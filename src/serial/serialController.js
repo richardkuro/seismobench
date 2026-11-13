@@ -59,26 +59,36 @@ export class SeismoSerialController {
   }
 
   /**
-   * Connect to physical ESP32-S3 via Web Serial API
+   * Connect to physical ESP32 via Web Serial API
    */
   async connectPhysical(baud = 921600) {
     if (!this.isSupported()) {
-      throw new Error('Web Serial API is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Opera, or click "Simulate ESP32" for standalone testing.');
+      const errMsg = 'Web Serial API is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Opera.';
+      if (this.onError) this.onError(errMsg);
+      throw new Error(errMsg);
+    }
+
+    // If already connected or an old port reference is hanging, cleanly disconnect first
+    if (this.port || this.isConnected) {
+      await this.disconnect();
     }
 
     try {
-      this.port = await navigator.serial.requestPort();
+      // Prompt user to grant permission and select the USB Serial port
+      const selectedPort = await navigator.serial.requestPort();
+      this.port = selectedPort;
       this.baudRate = baud;
+
+      // Open port with optimal driver parameters
       await this.port.open({
         baudRate: this.baudRate,
-        bufferSize: 8192,
         flowControl: 'none'
       });
 
       this.isConnected = true;
       this.isSimulated = false;
       this.setState('CONNECTED');
-      this.logRx(`[SYSTEM] Connected to physical ESP32-S3 port @ ${this.baudRate} baud`);
+      this.logRx(`[SYSTEM] Connected to physical ESP32 port @ ${this.baudRate} baud`);
 
       // Start continuous background read stream
       this.startReading();
@@ -87,11 +97,33 @@ export class SeismoSerialController {
       await this.sendPacket('PING:SEISMOBENCH_V1');
       return true;
     } catch (err) {
-      this.disconnect();
-      if (err.name !== 'NotFoundError') {
-        if (this.onError) this.onError(err.message);
+      await this.disconnect();
+
+      // Handle user cancellation gracefully
+      if (err.name === 'NotFoundError') {
+        return false;
       }
-      throw err;
+
+      let userFriendlyMsg = err.message || 'Unknown connection error';
+
+      if (
+        err.name === 'NetworkError' ||
+        userFriendlyMsg.includes('Failed to open serial port') ||
+        userFriendlyMsg.includes('Access denied')
+      ) {
+        userFriendlyMsg = 'The COM port is currently locked or in use! Please CLOSE the Arduino IDE Serial Monitor, PuTTY, or VS Code, and try clicking CONNECT again.';
+      } else if (
+        err.name === 'SecurityError' ||
+        userFriendlyMsg.includes('not allowed') ||
+        userFriendlyMsg.includes('permission')
+      ) {
+        userFriendlyMsg = 'Browser blocked USB access! Click the "Tune/Lock" icon in your Chrome address bar, ensure "Serial ports" is allowed for this site, and reload the page.';
+      }
+
+      if (this.onError) {
+        this.onError(userFriendlyMsg);
+      }
+      throw new Error(userFriendlyMsg);
     }
   }
 
@@ -99,10 +131,9 @@ export class SeismoSerialController {
    * Continuous background reader for incoming serial stream
    */
   async startReading() {
-    const textDecoder = new TextDecoderStream();
-    const readableStreamClosed = this.port.readable.pipeTo(textDecoder.writable);
-    this.reader = textDecoder.readable.getReader();
-
+    if (!this.port || !this.port.readable) return;
+    this.reader = this.port.readable.getReader();
+    const decoder = new TextDecoder();
     let lineBuffer = '';
 
     try {
@@ -110,7 +141,7 @@ export class SeismoSerialController {
         const { value, done } = await this.reader.read();
         if (done) break;
         if (value) {
-          lineBuffer += value;
+          lineBuffer += decoder.decode(value, { stream: true });
           const lines = lineBuffer.split('\n');
           lineBuffer = lines.pop(); // keep last incomplete line
 
@@ -126,7 +157,9 @@ export class SeismoSerialController {
         console.warn('Serial read error:', err);
       }
     } finally {
-      this.reader?.releaseLock();
+      try {
+        this.reader?.releaseLock();
+      } catch (e) {}
     }
   }
 
@@ -176,11 +209,14 @@ export class SeismoSerialController {
       throw new Error('Serial port is not writable.');
     }
 
-    const textEncoder = new TextEncoderStream();
-    const writableStreamClosed = textEncoder.readable.pipeTo(this.port.writable);
-    const writer = textEncoder.writable.getWriter();
-    await writer.write(packet);
-    writer.releaseLock();
+    const encoder = new TextEncoder();
+    const data = encoder.encode(packet);
+    const writer = this.port.writable.getWriter();
+    try {
+      await writer.write(data);
+    } finally {
+      writer.releaseLock();
+    }
   }
 
   /**

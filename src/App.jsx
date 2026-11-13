@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { AlertTriangle, X } from 'lucide-react';
 import { Header } from './components/Header';
 import { ConfigSidebar } from './components/ConfigSidebar';
 import { DataIngestionPanel } from './components/DataIngestionPanel';
@@ -58,6 +59,7 @@ export function App() {
   const [baudRate, setBaudRate] = useState(921600);
   const [packetLog, setPacketLog] = useState([]);
   const [bufferProgress, setBufferProgress] = useState(0);
+  const [connectionError, setConnectionError] = useState(null);
 
   // Modals
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -127,6 +129,7 @@ export function App() {
 
     serial.onError = (err) => {
       console.error('Serial Error:', err);
+      setConnectionError(err);
     };
 
     return () => {
@@ -226,10 +229,13 @@ export function App() {
 
   // Hardware Actions
   const handleConnectPhysical = async () => {
+    setConnectionError(null);
     try {
       await serial.connectPhysical(baudRate);
     } catch (err) {
-      console.warn('Physical connection notice:', err);
+      if (err.name !== 'NotFoundError') {
+        setConnectionError(err.message);
+      }
     }
   };
 
@@ -320,6 +326,43 @@ export function App() {
         strokeWarning={strokeWarning}
         stepsPerMm={stepsPerMm}
       />
+
+      {/* USB Connection Error Notice Banner */}
+      {connectionError && (
+        <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 pt-3">
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 flex items-start justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-500" />
+              <div className="flex flex-col gap-1.5 text-xs">
+                <span className="font-space font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                  USB Connection Notice
+                </span>
+                <p className="font-sans leading-relaxed text-neutral-800 dark:text-neutral-200">
+                  {connectionError}
+                </p>
+                <div className="flex flex-wrap items-center gap-3 mt-1 font-space text-[11px]">
+                  <button
+                    onClick={handleConnectPhysical}
+                    className="px-3 py-1 rounded-lg bg-amber-500 text-neutral-950 font-bold hover:brightness-110 transition-all cursor-pointer"
+                  >
+                    TRY CONNECTING AGAIN
+                  </button>
+                  <span className="text-neutral-500 dark:text-neutral-400">
+                    💡 Tip: If you were just testing in Arduino IDE, close the <b>Serial Monitor window</b>!
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setConnectionError(null)}
+              className="p-1 rounded-lg hover:bg-amber-500/20 text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors cursor-pointer"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto w-full p-4 sm:p-6 flex-1 flex flex-col gap-6">
