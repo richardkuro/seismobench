@@ -15,11 +15,13 @@ export class SeismoSerialController {
     this.isSimulated = false;
     this.baudRate = 921600;
     this.state = 'DISCONNECTED'; // DISCONNECTED, CONNECTED, BUFFERING, READY, RUNNING, ESTOP
+    this.isEstop = false;
+    this.sensorMode = 'with_adxl'; // 'with_adxl' | 'no_adxl'
     
     // Callbacks
     this.onPacketTx = null;
     this.onPacketRx = null;
-    this.onTelemetry = null; // (point: { time, accel, disp, step }) => void
+    this.onTelemetry = null; // (point: { time, accel, disp, step, cmdAccel, cmdDisp }) => void
     this.onProgress = null;  // (percent, current, total) => void
     this.onStateChange = null;
     this.onError = null;
@@ -232,25 +234,43 @@ export class SeismoSerialController {
   }
 
   /**
-   * Simulates the ESP32-S3 firmware state machine response to commands
+   * Set Sensor Mode: 'with_adxl' | 'no_adxl'
+   */
+  async setSensorMode(mode) {
+    this.sensorMode = mode;
+    this.logRx(`[SYSTEM] Telemetry mode set to: ${mode === 'with_adxl' ? 'ADXL355 Hardware SPI' : 'Open-Loop Stepper Kinematics'}`);
+    if (this.isConnected && !this.isSimulated) {
+      try {
+        await this.sendPacket(`CFG:SENSOR=${mode === 'with_adxl' ? 1 : 0}`);
+      } catch (e) {}
+    }
+  }
+
+  /**
+   * Simulates the ESP32 firmware state machine response to commands
    */
   handleSimulatedRx(cmd) {
     if (cmd.startsWith('PING')) {
-      this.logRx('PONG:ESP32-S3_DUAL_STEPPER_FW_V2.4 [TMC2209:OK, ADXL356:CALIBRATED]');
+      this.logRx(`PONG:ESP32_DUAL_STEPPER_FW_V2.5 [TMC2209:OK, SENSOR:${this.sensorMode === 'with_adxl' ? 'ADXL355_ACTIVE' : 'OPEN_LOOP'}]`);
     } else if (cmd.startsWith('CFG:')) {
       this.logRx('OK:CFG_STORED [GT2_20T, 1/16uStep, 80steps/mm, SoftLimit:Active]');
     } else if (cmd.startsWith('BUF_START:')) {
+      this.isEstop = false;
       this.logRx('OK:BUFFER_ALLOCATED_SRAM (Free DMA: 284KB)');
     } else if (cmd.startsWith('EXEC:START')) {
+      this.isEstop = false;
       this.setState('RUNNING');
-      this.logRx('STATUS:SHAKING_ACTIVE [FreeRTOS Timer 50Hz, Stepper ISR Enabled]');
+      this.logRx('STATUS:SHAKING_ACTIVE [FreeRTOS Timer 50Hz, Stepper Core 1 Active]');
       this.runSimulatedShakeLoop();
     } else if (cmd.startsWith('ESTOP')) {
+      this.isEstop = true;
       this.stopExecution();
-      this.logRx('WARN:ESTOP_ASSERTED - Stepper PWM Killed, Table Disabled');
+      this.logRx('WARN:ESTOP_ASSERTED - Stepper PWM Killed, Motor Power Cut');
       this.setState('ESTOP');
-    } else if (cmd.startsWith('HOME')) {
-      this.logRx('OK:HOMING_CYCLE_COMPLETE - Center Reference 0.00mm');
+    } else if (cmd.startsWith('RESET') || cmd.startsWith('HOME')) {
+      this.isEstop = false;
+      this.setState('READY');
+      this.logRx('OK:HOMING_CYCLE_COMPLETE - Center Reference 0.00mm, Drivers Re-enabled');
     }
   }
 
@@ -262,6 +282,7 @@ export class SeismoSerialController {
       throw new Error('Device not connected. Connect physical ESP32 or activate Simulation mode.');
     }
 
+    this.isEstop = false; // Reset any previous ESTOP flag so new buffer uploads cleanly
     this.trajectoryBuffer = trajectoryPoints;
     const total = trajectoryPoints.length;
     this.setState('BUFFERING');
@@ -271,10 +292,13 @@ export class SeismoSerialController {
     // Stream points in chunks
     const chunkSize = 50;
     for (let i = 0; i < total; i += chunkSize) {
-      if (this.state === 'ESTOP') break;
+      if (this.isEstop) {
+        this.logRx('WARN:UPLOAD_ABORTED - Emergency Stop signaled during buffer transfer');
+        break;
+      }
 
       const chunk = trajectoryPoints.slice(i, i + chunkSize);
-      const chunkPayload = chunk.map(p => `${Math.round(p.time * 1000)}:${p.step}:${p.disp.toFixed(2)}`).join(';');
+      const chunkPayload = chunk.map(p => `${Math.round(p.time * 1000)}:${p.step}:${p.disp.toFixed(2)}:${(p.accel || 0).toFixed(4)}`).join(';');
       
       await this.sendPacket(`CHUNK:${i}:${chunkPayload}`);
 
@@ -285,9 +309,11 @@ export class SeismoSerialController {
       await new Promise(r => setTimeout(r, this.isSimulated ? 2 : 20));
     }
 
-    await this.sendPacket(`BUF_END:CHECKSUM=0x${(total * 47 & 0xFFFF).toString(16).toUpperCase()}`);
-    this.setState('READY');
-    this.logRx(`[SYSTEM] Trajectory buffer verification passed. ${total} motion steps loaded.`);
+    if (!this.isEstop) {
+      await this.sendPacket(`BUF_END:CHECKSUM=0x${(total * 47 & 0xFFFF).toString(16).toUpperCase()}`);
+      this.setState('READY');
+      this.logRx(`[SYSTEM] Trajectory buffer verification passed. ${total} motion steps loaded.`);
+    }
   }
 
   /**
@@ -297,6 +323,7 @@ export class SeismoSerialController {
     if (!this.isConnected) {
       throw new Error('Device not connected.');
     }
+    this.isEstop = false;
     await this.sendPacket('EXEC:START');
   }
 
@@ -304,16 +331,36 @@ export class SeismoSerialController {
    * Stop / Emergency Stop
    */
   async emergencyStop() {
+    this.isEstop = true;
     this.stopExecution();
-    await this.sendPacket('ESTOP:EMERGENCY_HALT');
+    try {
+      await this.sendPacket('ESTOP:EMERGENCY_HALT');
+    } catch (e) {
+      console.warn('ESTOP packet send notice:', e);
+    }
     this.setState('ESTOP');
+  }
+
+  /**
+   * Reset / Clear Emergency Stop
+   */
+  async resetEstop() {
+    this.isEstop = false;
+    this.stopExecution();
+    try {
+      await this.sendPacket('RESET:ESTOP_CLEAR');
+    } catch (e) {}
+    this.setState('READY');
+    this.logRx('[SYSTEM] E-STOP cleared. Motor drivers re-enabled.');
   }
 
   /**
    * Homing Cycle
    */
   async homeTable() {
+    this.isEstop = false;
     await this.sendPacket('HOME:OPTICAL_LIMIT_CENTER');
+    this.setState('READY');
   }
 
   stopExecution() {
@@ -325,10 +372,7 @@ export class SeismoSerialController {
 
   /**
    * Runs the simulated shake loop in standalone mode.
-   * Simulates realistic physical table dynamics:
-   * - Stepper motor lag & mechanical backlash (~18ms phase delay)
-   * - Chassis resonance (secondary ringing around 9.5 Hz)
-   * - ADXL356 high-resolution analog accelerometer noise density (0.003g Gaussian noise)
+   * Accurately supports both 'with_adxl' and 'no_adxl' modes!
    */
   runSimulatedShakeLoop() {
     this.stopExecution();
@@ -345,10 +389,12 @@ export class SeismoSerialController {
     const zeta = 0.15; // chassis damping ratio
 
     this.simTimer = setInterval(() => {
-      if (index >= total || this.state === 'ESTOP') {
+      if (index >= total || this.isEstop || this.state === 'ESTOP') {
         this.stopExecution();
-        this.setState('CONNECTED');
-        this.logRx('STATUS:SHAKE_COMPLETE [Profile Finished, Carriage Idle at 0.00mm]');
+        if (!this.isEstop && this.state !== 'ESTOP') {
+          this.setState('CONNECTED');
+          this.logRx('STATUS:SHAKE_COMPLETE [Profile Finished, Carriage Idle at 0.00mm]');
+        }
         return;
       }
 
@@ -356,20 +402,27 @@ export class SeismoSerialController {
       const cmdAccel = point.accel || 0;
       const cmdDisp = point.disp || 0;
 
-      // Physics model: 2nd-order harmonic response to commanded acceleration
-      const dtSec = dtMs / 1000;
-      const resAccel = -2 * zeta * omegaN * resVel - omegaN * omegaN * resPos + (cmdAccel * 9.81 * 0.12);
-      resVel += resAccel * dtSec;
-      resPos += resVel * dtSec;
+      let measuredAccel = cmdAccel;
+      let measuredDisp = cmdDisp;
 
-      // Realistic ADXL356 sensor noise (Gaussian distribution, ~0.002g RMS)
-      const u1 = Math.random() || 0.001;
-      const u2 = Math.random() || 0.001;
-      const sensorNoise = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2) * 0.0035;
+      if (this.sensorMode === 'with_adxl') {
+        // Physical ADXL355 sensor simulation with structural chassis dynamics & 25 ug/sqrt(Hz) noise
+        const dtSec = dtMs / 1000;
+        const resAccel = -2 * zeta * omegaN * resVel - omegaN * omegaN * resPos + (cmdAccel * 9.81 * 0.10);
+        resVel += resAccel * dtSec;
+        resPos += resVel * dtSec;
 
-      // Add mechanical lag and micro-resonance
-      const measuredAccel = cmdAccel * 0.98 + (resPos * 0.05) + sensorNoise;
-      const measuredDisp = cmdDisp + (resPos * 0.2);
+        const u1 = Math.random() || 0.001;
+        const u2 = Math.random() || 0.001;
+        const sensorNoise = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2) * 0.0025;
+
+        measuredAccel = cmdAccel * 0.98 + (resPos * 0.04) + sensorNoise;
+        measuredDisp = cmdDisp + (resPos * 0.12);
+      } else {
+        // Without ADXL: Pure mechanical open-loop kinematics from motor microstepping
+        measuredAccel = cmdAccel;
+        measuredDisp = cmdDisp;
+      }
 
       // Stream simulated TLM packet
       const tlmLine = `TLM:${Math.round(point.time * 1000)},${measuredAccel.toFixed(5)},${measuredDisp.toFixed(2)},${point.step}`;
@@ -388,6 +441,10 @@ export class SeismoSerialController {
 
       index++;
     }, dtMs);
+  }
+
+  clearTrajectoryBuffer() {
+    this.trajectoryBuffer = [];
   }
 
   async disconnect() {

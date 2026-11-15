@@ -74,12 +74,15 @@ struct TrajectoryPoint {
   uint32_t t_ms;
   int32_t target_step;
   float disp_mm;
+  float accel_g;
 };
 
 #define MAX_POINTS 4096
 TrajectoryPoint trajectoryBuffer[MAX_POINTS];
 volatile uint16_t bufferPointCount = 0;
 volatile uint16_t bufferDtMs = 20;
+volatile bool sensorEnabled = true; // Toggle between ADXL355 SPI and Open-Loop Stepper
+bool adxlPresent = false;
 
 // System states
 enum SystemState {
@@ -204,8 +207,13 @@ void motionTaskCore1(void* parameter) {
         }
       }
 
-      // Read real ADXL355 20-bit digital acceleration
-      float accel_g = adxlReadAccelX();
+      // Read acceleration: ADXL355 SPI or Open-Loop Kinematics fallback
+      float accel_g = 0.0f;
+      if (sensorEnabled && adxlPresent) {
+        accel_g = adxlReadAccelX();
+      } else {
+        accel_g = pt.accel_g;
+      }
 
       // Stream high-rate telemetry line to USB Serial
       Serial.printf("TLM:%lu,%.5f,%.3f,%ld\n", pt.t_ms, accel_g, pt.disp_mm, currentStepPos);
@@ -261,13 +269,17 @@ void setup() {
   // Read PARTID (Should return 0xED)
   uint8_t devId = adxlReadByte(ADXL355_REG_DEVID_AD); // 0xAD
   uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);   // 0xED
+  adxlPresent = (devId == 0xAD || partId == 0xED);
 
-  // Set Range to +/- 2g (0x01)
-  adxlWriteByte(ADXL355_REG_RANGE, 0x01);
-
-  // Power control: clear STANDBY bit (write 0x00) to enter Active Measurement Mode
-  adxlWriteByte(ADXL355_REG_POWER_CTL, 0x00);
-  delay(10); // Settle analog front-end filter
+  if (adxlPresent) {
+    // Set Range to +/- 2g (0x01)
+    adxlWriteByte(ADXL355_REG_RANGE, 0x01);
+    // Power control: clear STANDBY bit (write 0x00) to enter Active Measurement Mode
+    adxlWriteByte(ADXL355_REG_POWER_CTL, 0x00);
+    delay(10); // Settle analog front-end filter
+  } else {
+    Serial.println("WARN:ADXL355_NOT_DETECTED - Fallback to Open-Loop Stepper Telemetry");
+  }
 
   // 5. Initialize TMC2209 Drivers via Single-Wire UART
   DriverSerial.begin(115200, SERIAL_8N1, PIN_TMC_RX, PIN_TMC_TX);
@@ -299,7 +311,8 @@ void setup() {
     1 // Pin strictly to Core 1
   );
 
-  Serial.printf("STATUS:READY [ESP32-S3 Ready | ADXL355:0x%02X (Part:0x%02X) | Dual TMC2209:OK]\n", devId, partId);
+  Serial.printf("STATUS:READY [ESP32 Ready | SENSOR:%s (0x%02X) | Dual TMC2209:OK]\n", 
+    adxlPresent ? "ADXL355_SPI" : "OPEN_LOOP", partId);
 }
 
 // ============================================================================
@@ -314,18 +327,21 @@ void processChunkPayload(int offset, const String& payload) {
     int nextSemi = payload.indexOf(';', startIdx);
     String token = (nextSemi == -1) ? payload.substring(startIdx) : payload.substring(startIdx, nextSemi);
 
-    // Token format: time_ms:target_step:disp_mm
+    // Token format: time_ms:target_step:disp_mm or time_ms:target_step:disp_mm:accel_g
     int c1 = token.indexOf(':');
-    int c2 = token.lastIndexOf(':');
+    int c2 = token.indexOf(':', c1 + 1);
+    int c3 = (c2 > 0) ? token.indexOf(':', c2 + 1) : -1;
 
     if (c1 > 0 && c2 > c1) {
       uint32_t t_ms = token.substring(0, c1).toInt();
       int32_t step = token.substring(c1 + 1, c2).toInt();
-      float disp = token.substring(c2 + 1).toFloat();
+      float disp = (c3 > c2) ? token.substring(c2 + 1, c3).toFloat() : token.substring(c2 + 1).toFloat();
+      float accel = (c3 > c2) ? token.substring(c3 + 1).toFloat() : 0.0f;
 
       trajectoryBuffer[currentOffset].t_ms = t_ms;
       trajectoryBuffer[currentOffset].target_step = step;
       trajectoryBuffer[currentOffset].disp_mm = disp;
+      trajectoryBuffer[currentOffset].accel_g = accel;
       currentOffset++;
     }
 
@@ -344,7 +360,13 @@ void loop() {
       uint8_t verL = driverL.version();
       uint8_t verR = driverR.version();
       uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);
-      Serial.printf("PONG:ESP32-S3_DUAL_STEPPER_FW_V2.4 [TMC2209_L:0x%02X, TMC2209_R:0x%02X, ADXL355:0x%02X]\n", verL, verR, partId);
+      Serial.printf("PONG:ESP32_DUAL_STEPPER_FW_V2.5 [TMC2209_L:0x%02X, TMC2209_R:0x%02X, SENSOR:%s (0x%02X)]\n", 
+        verL, verR, (sensorEnabled && adxlPresent) ? "ADXL355_ACTIVE" : "OPEN_LOOP", partId);
+    }
+    else if (line.startsWith("CFG:SENSOR=")) {
+      int sVal = line.substring(11).toInt();
+      sensorEnabled = (sVal != 0);
+      Serial.printf("OK:SENSOR_MODE_UPDATED [%s]\n", (sensorEnabled && adxlPresent) ? "ADXL355_SPI_ACTIVE" : "OPEN_LOOP_STEPPER");
     }
     else if (line.startsWith("BUF_START:")) {
       emergencyStopFlag = false;
@@ -394,11 +416,12 @@ void loop() {
       digitalWrite(PIN_EN, HIGH); // Disable stepper H-bridges (Active LOW)
       Serial.println("WARN:ESTOP_ASSERTED - Stepper PWM Killed, Table Disabled");
     }
-    else if (line.startsWith("HOME")) {
+    else if (line.startsWith("RESET") || line.startsWith("HOME")) {
       emergencyStopFlag = false;
       currentStepPos = 0;
       currentState = STATE_READY;
-      Serial.println("OK:HOMING_CYCLE_COMPLETE - Center Reference 0.00mm");
+      digitalWrite(PIN_EN, HIGH); // Drivers safe until next execution
+      Serial.println("OK:RESET_CYCLE_COMPLETE - Center Reference 0.00mm, E-STOP Cleared, Drivers Ready");
     }
   }
 }

@@ -245,7 +245,12 @@ void motionTaskCore1(void* parameter) {
         }
       }
 
-      float accel_g = adxlReadAccelX();
+      float accel_g = 0.0f;
+      if (sensorEnabled && adxlPresent) {
+        accel_g = adxlReadAccelX();
+      } else {
+        accel_g = pt.accel_g;
+      }
 
       Serial.printf("TLM:%lu,%.5f,%.3f,%ld\\n", pt.t_ms, accel_g, pt.disp_mm, currentStepPos);
 
@@ -399,17 +404,23 @@ void loop() {
         Serial.println("WARN:NOT_READY_TO_EXECUTE");
       }
     }
+    else if (line.startsWith("CFG:SENSOR=")) {
+      int sVal = line.substring(11).toInt();
+      sensorEnabled = (sVal != 0);
+      Serial.printf("OK:SENSOR_MODE_UPDATED [%s]\\n", (sensorEnabled && adxlPresent) ? "ADXL355_SPI_ACTIVE" : "OPEN_LOOP_STEPPER");
+    }
     else if (line.startsWith("ESTOP")) {
       emergencyStopFlag = true;
       currentState = STATE_ESTOP;
       digitalWrite(PIN_EN, HIGH);
       Serial.println("WARN:ESTOP_ASSERTED - Stepper PWM Killed, Table Disabled");
     }
-    else if (line.startsWith("HOME")) {
+    else if (line.startsWith("RESET") || line.startsWith("HOME")) {
       emergencyStopFlag = false;
       currentStepPos = 0;
       currentState = STATE_READY;
-      Serial.println("OK:HOMING_CYCLE_COMPLETE - Center Reference 0.00mm");
+      digitalWrite(PIN_EN, HIGH);
+      Serial.println("OK:RESET_CYCLE_COMPLETE - Center Reference 0.00mm, E-STOP Cleared, Drivers Ready");
     }
   }
 }

@@ -12,7 +12,9 @@ import {
   Moon, 
   Sun, 
   Usb,
-  Radio
+  Radio,
+  Unlink,
+  RotateCcw
 } from 'lucide-react';
 
 export function Header({
@@ -22,12 +24,15 @@ export function Header({
   onToggleTheme,
   connectionState,
   isSimulated,
+  sensorMode = 'with_adxl',
+  onToggleSensorMode,
   onConnectPhysical,
   onStartSimulation,
   onDisconnect,
   onUploadBuffer,
   onExecuteShake,
   onEmergencyStop,
+  onResetEstop,
   onOpenTerminal,
   onOpenPayloadModal,
   bufferProgress,
@@ -37,6 +42,7 @@ export function Header({
   const isConnected = connectionState !== 'DISCONNECTED';
   const isRunning = connectionState === 'RUNNING';
   const isBuffering = connectionState === 'BUFFERING';
+  const isEstop = connectionState === 'ESTOP';
 
   return (
     <header className="sticky top-0 z-40 px-4 sm:px-6 py-3 border-b border-neutral-200 dark:border-neutral-800 bg-white/90 dark:bg-[#060606]/90 backdrop-blur-xl transition-colors">
@@ -54,7 +60,7 @@ export function Header({
                 SEISMOBENCH (R)
               </span>
               <span className="text-[10px] font-space px-2 py-0.5 rounded-full border border-neutral-300 dark:border-neutral-800 text-neutral-500 dark:text-neutral-400">
-                ESP32-S3
+                ESP32
               </span>
             </div>
             <p className="text-[10px] font-space text-neutral-400 dark:text-neutral-500 uppercase tracking-wider flex items-center gap-2">
@@ -149,27 +155,64 @@ export function Header({
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
-              {/* Shake Execution Button */}
-              <button
-                onClick={onExecuteShake}
-                disabled={isRunning || isBuffering}
-                className="px-3.5 py-1.5 rounded-full bg-[#D71921] text-white text-xs font-space font-bold hover:bg-[#b5141b] transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-              >
-                <Play className="w-3.5 h-3.5 fill-current" />
-                <span>{isRunning ? 'RUNNING...' : 'EXECUTE'}</span>
-              </button>
+              {/* Reset E-Stop Button (If Asserted) */}
+              {isEstop ? (
+                <button
+                  onClick={onResetEstop}
+                  className="px-3.5 py-1.5 rounded-full bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-space font-bold transition-all cursor-pointer flex items-center gap-1.5 animate-pulse shadow-lg shadow-amber-500/20"
+                  title="Clear Emergency Stop and Re-enable Stepper Motor Power"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>RESET E-STOP</span>
+                </button>
+              ) : (
+                /* Shake Execution Button */
+                <button
+                  onClick={onExecuteShake}
+                  disabled={isRunning || isBuffering}
+                  className="px-3.5 py-1.5 rounded-full bg-[#D71921] text-white text-xs font-space font-bold hover:bg-[#b5141b] transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                  title="Stream and execute trajectory profile on shake table"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>{isRunning ? 'RUNNING...' : isBuffering ? `BUFFERING ${bufferProgress}%` : 'EXECUTE'}</span>
+                </button>
+              )}
 
               {/* Emergency Stop */}
               <button
                 onClick={onEmergencyStop}
-                className="px-3 py-1.5 rounded-full border border-rose-500/50 text-rose-500 hover:bg-rose-500 hover:text-white text-xs font-space font-bold transition-all cursor-pointer flex items-center gap-1"
-                title="EMERGENCY STOP (Cut Power)"
+                className="px-3 py-1.5 rounded-full border border-rose-500/50 bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white text-xs font-space font-bold transition-all cursor-pointer flex items-center gap-1"
+                title="EMERGENCY STOP (Cut Motor Power Immediately)"
               >
                 <Square className="w-3 h-3 fill-current" />
                 <span>E-STOP</span>
               </button>
+
+              {/* Direct Disconnect Button on Main Screen */}
+              <button
+                onClick={onDisconnect}
+                className="px-3 py-1.5 rounded-full border border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-[#18181b] hover:bg-rose-500/15 hover:border-rose-500/50 hover:text-rose-500 text-xs font-space font-medium text-neutral-700 dark:text-neutral-300 transition-all cursor-pointer flex items-center gap-1.5"
+                title="Disconnect Serial Port"
+              >
+                <Unlink className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">DISCONNECT</span>
+              </button>
             </div>
           )}
+
+          {/* Sensor Mode Toggle Pill */}
+          <button
+            onClick={onToggleSensorMode}
+            className={`hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-space border transition-all cursor-pointer ${
+              sensorMode === 'with_adxl'
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'border-neutral-300 dark:border-neutral-700 bg-neutral-100 dark:bg-[#141416] text-neutral-500 dark:text-neutral-400'
+            }`}
+            title="Toggle Sensor Mode: ADXL355 20-Bit SPI vs Open-Loop Stepper"
+          >
+            <Radio className={`w-3 h-3 ${sensorMode === 'with_adxl' ? 'text-emerald-500' : 'text-neutral-400'}`} />
+            <span>{sensorMode === 'with_adxl' ? 'ADXL355' : 'NO SENSOR'}</span>
+          </button>
 
           {/* Terminal & Payload Buttons */}
           <button

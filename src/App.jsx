@@ -8,6 +8,7 @@ import { GraphsDashboard } from './components/GraphsDashboard';
 import { SerialTerminalModal } from './components/SerialTerminalModal';
 import { PayloadGeneratorModal } from './components/PayloadGeneratorModal';
 import { AnalyticsView } from './components/AnalyticsView';
+import { LiveSerialMonitorWidget } from './components/LiveSerialMonitorWidget';
 
 import { doubleIntegrateDriftFree } from './dsp/integration';
 import { computeFFT } from './dsp/fft';
@@ -15,7 +16,12 @@ import { calculateRMSE, calculateCrossCorrelationAndLag, checkPhysicalLimits } f
 import { 
   getElCentro1940,
   generateKobeWaveform, 
-  generateNorthridgeWaveform, 
+  generateNorthridgeWaveform,
+  generateMexicoCityWaveform,
+  generateTohokuWaveform,
+  generateChiChiWaveform,
+  generateTurkeyWaveform,
+  generateShinozukaBenchmark,
   generateSineSweep 
 } from './data/earthquakes';
 import { SeismoSerialController } from './serial/serialController';
@@ -60,6 +66,7 @@ export function App() {
   const [packetLog, setPacketLog] = useState([]);
   const [bufferProgress, setBufferProgress] = useState(0);
   const [connectionError, setConnectionError] = useState(null);
+  const [sensorMode, setSensorMode] = useState('with_adxl'); // 'with_adxl' | 'no_adxl'
 
   // Modals
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -137,22 +144,47 @@ export function App() {
     };
   }, [serial]);
 
-  // Handle Earthquake Selection
+  // Handle Earthquake Selection (Supports all 9 preloaded earthquakes + Custom CSV)
   const handleSelectEarthquake = (id) => {
     setSelectedEarthquakeId(id);
     setTelemetryStream([]);
     setCurrentCarriage({ dispMm: 0, accelG: 0, velocityMmS: 0 });
+    // Invalidate serial trajectory buffer so next execute re-uploads the new record!
+    serial.clearTrajectoryBuffer();
 
-    if (id === 'elcentro') {
-      setRawWaveform(getElCentro1940());
-    } else if (id === 'kobe') {
-      setRawWaveform(generateKobeWaveform());
-    } else if (id === 'northridge') {
-      setRawWaveform(generateNorthridgeWaveform());
-    } else if (id === 'sweep') {
-      setRawWaveform(generateSineSweep());
-    } else if (customWaveform && customWaveform.id === id) {
-      setRawWaveform(customWaveform);
+    switch (id) {
+      case 'elcentro':
+        setRawWaveform(getElCentro1940());
+        break;
+      case 'kobe':
+        setRawWaveform(generateKobeWaveform());
+        break;
+      case 'northridge':
+        setRawWaveform(generateNorthridgeWaveform());
+        break;
+      case 'mexico1985':
+        setRawWaveform(generateMexicoCityWaveform());
+        break;
+      case 'tohoku2011':
+        setRawWaveform(generateTohokuWaveform());
+        break;
+      case 'chichi1999':
+        setRawWaveform(generateChiChiWaveform());
+        break;
+      case 'turkey2023':
+        setRawWaveform(generateTurkeyWaveform());
+        break;
+      case 'shinozuka':
+        setRawWaveform(generateShinozukaBenchmark());
+        break;
+      case 'sweep':
+        setRawWaveform(generateSineSweep());
+        break;
+      default:
+        if (customWaveform && customWaveform.id === id) {
+          setRawWaveform(customWaveform);
+        }
+        break;
     }
   };
 
@@ -161,6 +193,7 @@ export function App() {
     setSelectedEarthquakeId(parsedData.id);
     setRawWaveform(parsedData);
     setTelemetryStream([]);
+    serial.clearTrajectoryBuffer();
   };
 
   // Run DSP Pipeline: Double Integration, HP Butterworth Filtering, Zero-Drift
@@ -267,9 +300,12 @@ export function App() {
   const handleExecuteShake = async () => {
     setTelemetryStream([]);
     try {
-      if (serial.trajectoryBuffer.length === 0) {
-        await handleUploadBuffer();
+      // If table was in E-STOP state, cleanly reset it first
+      if (serial.isEstop || connectionState === 'ESTOP') {
+        await serial.resetEstop();
       }
+      // Always upload fresh trajectory buffer of currently selected earthquake & scaling
+      await handleUploadBuffer();
       await serial.executeShake();
     } catch (err) {
       alert(`Shake execution notice: ${err.message}`);
@@ -278,6 +314,16 @@ export function App() {
 
   const handleEmergencyStop = async () => {
     await serial.emergencyStop();
+  };
+
+  const handleResetEstop = async () => {
+    await serial.resetEstop();
+  };
+
+  const handleToggleSensorMode = async () => {
+    const nextMode = sensorMode === 'with_adxl' ? 'no_adxl' : 'with_adxl';
+    setSensorMode(nextMode);
+    await serial.setSensorMode(nextMode);
   };
 
   const handleHomeTable = async () => {
@@ -294,6 +340,9 @@ export function App() {
       name: rawWaveform.name,
       location: rawWaveform.location,
       date: rawWaveform.date,
+      magnitude: rawWaveform.magnitude || 6.9,
+      mmi: rawWaveform.mmi || 'VIII',
+      depthKm: rawWaveform.depthKm || 15.0,
       description: rawWaveform.description,
       pga: rawWaveform.pga,
       duration: rawWaveform.duration,
@@ -313,12 +362,15 @@ export function App() {
         onToggleTheme={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
         connectionState={connectionState}
         isSimulated={isSimulated}
+        sensorMode={sensorMode}
+        onToggleSensorMode={handleToggleSensorMode}
         onConnectPhysical={handleConnectPhysical}
         onStartSimulation={handleStartSimulation}
         onDisconnect={handleDisconnect}
         onUploadBuffer={handleUploadBuffer}
         onExecuteShake={handleExecuteShake}
         onEmergencyStop={handleEmergencyStop}
+        onResetEstop={handleResetEstop}
         onHomeTable={handleHomeTable}
         onOpenTerminal={() => setIsTerminalOpen(true)}
         onOpenPayloadModal={() => setIsPayloadOpen(true)}
@@ -405,7 +457,7 @@ export function App() {
                 />
               </div>
 
-              {/* Right Column: 4 Engineering Graphs (8 Cols) */}
+              {/* Right Column: 5 Engineering Graphs (8 Cols) */}
               <div className="lg:col-span-8 flex flex-col gap-6">
                 <GraphsDashboard
                   timeArray={dspResult.time}
@@ -419,10 +471,30 @@ export function App() {
                   playbackIndex={playbackIndex}
                   onScrubTime={(idx) => setPlaybackIndex(idx)}
                   theme={theme}
+                  waveformMeta={waveformMeta}
+                  sensorMode={sensorMode}
                 />
               </div>
 
             </div>
+
+            {/* Live Serial Monitor & Packet Stream Widget Directly on Bench View */}
+            <LiveSerialMonitorWidget
+              packetLog={packetLog}
+              onClearLog={() => setPacketLog([])}
+              onSendCommand={handleSendCommand}
+              connectionState={connectionState}
+              isSimulated={isSimulated}
+              sensorMode={sensorMode}
+              onToggleSensorMode={handleToggleSensorMode}
+              onConnectPhysical={handleConnectPhysical}
+              onStartSimulation={handleStartSimulation}
+              onDisconnect={handleDisconnect}
+              onResetEstop={handleResetEstop}
+              onEmergencyStop={handleEmergencyStop}
+              onHomeTable={handleHomeTable}
+              baudRate={baudRate}
+            />
           </div>
         )}
 
@@ -446,12 +518,12 @@ export function App() {
             (NOTHING) SEISMOBENCH
           </span>
           <span>//</span>
-          <span>ESP32-S3 DUAL-STEPPER RTOS</span>
+          <span>ESP32 DUAL-STEPPER RTOS</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-[#D71921] font-bold">WEB SERIAL API</span>
           <span>//</span>
-          <span>ADXL356 SENSOR</span>
+          <span>ADXL355 SPI SENSOR</span>
         </div>
       </footer>
 

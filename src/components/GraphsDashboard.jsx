@@ -5,7 +5,10 @@ import {
   BarChart2, 
   TrendingUp, 
   CheckCircle, 
-  Sliders
+  Sliders,
+  Zap,
+  Radio,
+  Flame
 } from 'lucide-react';
 
 export function GraphsDashboard({
@@ -19,12 +22,15 @@ export function GraphsDashboard({
   metrics = { rmse: 0, correlationPercent: 100, latencyMs: 0 },
   playbackIndex = 0,
   onScrubTime = null,
-  theme = 'dark'
+  theme = 'dark',
+  waveformMeta = null,
+  sensorMode = 'with_adxl'
 }) {
   const accelPlotRef = useRef(null);
   const dispPlotRef = useRef(null);
   const fftPlotRef = useRef(null);
   const telemetryPlotRef = useRef(null);
+  const richterPlotRef = useRef(null);
 
   const [showVelocity, setShowVelocity] = useState(false);
   const isDark = theme === 'dark';
@@ -306,7 +312,7 @@ export function GraphsDashboard({
     safePlotlyReact(fftPlotRef.current, data, layout, plotlyConfig);
   }, [fftData, baseLayout, isDark]);
 
-  // 4. Telemetry Overlay: Commanded vs Measured ADXL356 Plot
+  // 4. Telemetry Overlay: Commanded vs Measured ADXL355 Plot
   useEffect(() => {
     if (!telemetryPlotRef.current || !timeArray || timeArray.length === 0) return;
 
@@ -320,6 +326,7 @@ export function GraphsDashboard({
     };
 
     let traceMeas = null;
+    const isHardwareSensor = sensorMode === 'with_adxl';
 
     if (telemetryStream.length > 0) {
       const streamTime = telemetryStream.map(p => p.time);
@@ -330,17 +337,19 @@ export function GraphsDashboard({
         y: streamAccel,
         type: 'scatter',
         mode: 'lines',
-        name: 'ADXL356 MEAS',
-        line: { color: '#D71921', width: 1.6 }
+        name: isHardwareSensor ? 'ADXL355 SPI MEAS' : 'OPEN-LOOP KINEMATICS',
+        line: { color: isHardwareSensor ? '#D71921' : '#38bdf8', width: 1.6 }
       };
     } else {
       traceMeas = {
         x: timeArray,
-        y: accelArray.map(a => a * 0.98 + (Math.sin(a * 15) * 0.004)),
+        y: isHardwareSensor 
+          ? accelArray.map(a => a * 0.98 + (Math.sin(a * 15) * 0.004))
+          : accelArray,
         type: 'scatter',
         mode: 'lines',
-        name: 'SIM LOOPBACK',
-        line: { color: '#D71921', width: 1.2, dash: 'dot' }
+        name: isHardwareSensor ? 'ADXL355 LOOPBACK' : 'STEPPER OPEN-LOOP',
+        line: { color: isHardwareSensor ? '#D71921' : '#38bdf8', width: 1.2, dash: 'dot' }
       };
     }
 
@@ -363,7 +372,7 @@ export function GraphsDashboard({
     const layout = {
       ...baseLayout,
       title: {
-        text: '04 // TELEMETRY: COMMANDED VS ADXL356 SENSOR',
+        text: `04 // TELEMETRY: COMMANDED VS ${isHardwareSensor ? 'ADXL355 20-BIT SPI SENSOR' : 'OPEN-LOOP STEPPER MOTOR'}`,
         font: { size: 10, color: isDark ? '#FFFFFF' : '#111111', family: '"Space Mono", monospace' },
         x: 0.02,
         y: 0.95
@@ -374,12 +383,118 @@ export function GraphsDashboard({
     };
 
     safePlotlyReact(telemetryPlotRef.current, data, layout, plotlyConfig);
-  }, [timeArray, accelArray, telemetryStream, playbackIndex, baseLayout, isDark]);
+  }, [timeArray, accelArray, telemetryStream, playbackIndex, sensorMode, baseLayout, isDark]);
+
+  // 5. Richter / Moment Magnitude (Mw) & Seismic Energy Comparison Plot
+  useEffect(() => {
+    if (!richterPlotRef.current) return;
+
+    const currentMw = waveformMeta?.magnitude || 6.9;
+    const currentName = waveformMeta?.name ? waveformMeta.name.split('(')[0].trim() : 'Active Quake';
+
+    const benchmarks = [
+      { name: '1994 Northridge, CA', mw: 6.7, energyStr: '169 kt TNT', mmi: 'IX' },
+      { name: '1940 El Centro, CA', mw: 6.9, energyStr: '337 kt TNT', mmi: 'VIII' },
+      { name: '1995 Kobe, Japan', mw: 6.9, energyStr: '337 kt TNT', mmi: 'IX' },
+      { name: 'Shinozuka Synthetic', mw: 7.2, energyStr: '950 kt TNT', mmi: 'VIII' },
+      { name: '1999 Chi-Chi, Taiwan', mw: 7.7, energyStr: '5.3 Mt TNT', mmi: 'IX' },
+      { name: '2023 Turkey-Syria', mw: 7.8, energyStr: '7.6 Mt TNT', mmi: 'X' },
+      { name: '1985 Mexico City', mw: 8.0, energyStr: '15.1 Mt TNT', mmi: 'IX' },
+      { name: '2011 Tohoku, Japan', mw: 9.1, energyStr: '674 Mt TNT', mmi: 'X' },
+      { name: '1960 Valdivia, Chile', mw: 9.5, energyStr: '2.7 Gt TNT', mmi: 'XII' }
+    ];
+
+    // Check if current quake is already in benchmarks, else add it
+    let items = [...benchmarks];
+    const exists = items.some(b => Math.abs(b.mw - currentMw) < 0.05 && b.name.toLowerCase().includes(currentName.toLowerCase().slice(0, 4)));
+    if (!exists && currentMw > 0) {
+      const eJ = Math.pow(10, 4.8 + 1.5 * currentMw);
+      const tons = eJ / 4.184e9;
+      const eStr = tons >= 1e6 ? `${(tons / 1e6).toFixed(1)} Mt TNT` : `${(tons / 1e3).toFixed(0)} kt TNT`;
+      items.push({
+        name: `ACTIVE: ${currentName}`,
+        mw: currentMw,
+        energyStr: eStr,
+        mmi: waveformMeta?.mmi || 'VIII'
+      });
+      items.sort((a, b) => a.mw - b.mw);
+    }
+
+    const yNames = items.map(b => b.name);
+    const xVals = items.map(b => b.mw);
+    const textLabels = items.map(b => `Mw ${b.mw} • ${b.energyStr} (MMI ${b.mmi})`);
+    const barColors = items.map(b => {
+      if (b.name.includes(currentName) || (Math.abs(b.mw - currentMw) < 0.05 && !b.name.includes('Valdivia'))) {
+        return '#D71921';
+      }
+      return isDark ? '#232328' : '#D1D1D8';
+    });
+
+    const data = [
+      {
+        type: 'bar',
+        orientation: 'h',
+        x: xVals,
+        y: yNames,
+        text: textLabels,
+        textposition: 'auto',
+        textfont: {
+          family: '"Space Mono", monospace',
+          size: 9,
+          color: isDark ? '#FFFFFF' : '#111111'
+        },
+        marker: {
+          color: barColors,
+          line: {
+            color: items.map(b => (b.name.includes(currentName) || Math.abs(b.mw - currentMw) < 0.05) ? '#FFFFFF' : (isDark ? '#3A3A40' : '#B0B0B8')),
+            width: 1
+          }
+        },
+        hoverinfo: 'text',
+        hovertext: items.map(b => `<b>${b.name}</b><br>Magnitude: Mw ${b.mw}<br>Energy: ${b.energyStr}<br>Intensity: MMI ${b.mmi}`)
+      }
+    ];
+
+    const layout = {
+      ...baseLayout,
+      title: {
+        text: '05 // RICHTER & MOMENT MAGNITUDE (Mw) SCALE & ENERGY EQUIVALENCE (JOULES / TNT)',
+        font: { size: 10, color: isDark ? '#FFFFFF' : '#111111', family: '"Space Mono", monospace' },
+        x: 0.02,
+        y: 0.95
+      },
+      xaxis: {
+        ...baseLayout.xaxis,
+        title: { text: 'MOMENT MAGNITUDE (Mw)', font: { size: 9 } },
+        range: [5.0, 10.0],
+        dtick: 0.5
+      },
+      yaxis: {
+        ...baseLayout.yaxis,
+        automargin: true,
+        tickfont: { size: 9, color: isDark ? '#CCCCCC' : '#333333' }
+      },
+      shapes: [
+        {
+          type: 'line',
+          xref: 'x',
+          yref: 'paper',
+          x0: currentMw,
+          x1: currentMw,
+          y0: 0,
+          y1: 1,
+          line: { color: '#D71921', width: 2, dash: 'dash' }
+        }
+      ]
+    };
+
+    safePlotlyReact(richterPlotRef.current, data, layout, plotlyConfig);
+  }, [waveformMeta, baseLayout, isDark]);
 
   // Window resize handler
   useEffect(() => {
     const handleResize = () => {
-      [accelPlotRef, dispPlotRef, fftPlotRef, telemetryPlotRef].forEach((ref) => {
+      [accelPlotRef, dispPlotRef, fftPlotRef, telemetryPlotRef, richterPlotRef].forEach((ref) => {
         if (ref.current && ref.current._fullLayout) {
           try {
             Plotly.Plots.resize(ref.current);
@@ -427,6 +542,16 @@ export function GraphsDashboard({
               0.00 MM
             </span>
           </div>
+
+          {/* Sensor Mode Telemetry Indicator */}
+          <div className={`hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full border text-[10px] font-mono ${
+            sensorMode === 'with_adxl'
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              : 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400'
+          }`}>
+            <Radio className="w-3 h-3" />
+            <span>{sensorMode === 'with_adxl' ? 'ADXL355 20-BIT SPI SENSOR' : 'OPEN-LOOP MOTOR KINEMATICS'}</span>
+          </div>
         </div>
 
         {/* Velocity Overlay Checkbox */}
@@ -465,6 +590,63 @@ export function GraphsDashboard({
         </div>
 
       </div>
+
+      {/* 5. Richter / Moment Magnitude (Mw) & Seismic Energy Comparison Card */}
+      {(() => {
+        const currentMw = waveformMeta?.magnitude || 6.9;
+        const currentMmi = waveformMeta?.mmi || 'VIII';
+        const energyJoules = Math.pow(10, 4.8 + 1.5 * currentMw);
+        const tntTons = energyJoules / 4.184e9;
+        const energyDisplay = tntTons >= 1e6 ? `${(tntTons / 1e6).toFixed(2)} Mt TNT` : `${(tntTons / 1e3).toFixed(1)} kt TNT`;
+
+        return (
+          <div className="nothing-card p-4 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 dark:border-neutral-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#D71921]" />
+                <h3 className="font-ndot text-xs font-bold tracking-wider uppercase text-neutral-900 dark:text-neutral-100">
+                  05 // RICHTER SCALE & MOMENT MAGNITUDE (Mw) BENCHMARK
+                </h3>
+              </div>
+              <span className="text-[10px] text-neutral-400 uppercase tracking-widest font-mono">
+                LOGARITHMIC ENERGY SPECTRUM
+              </span>
+            </div>
+
+            {/* 3 Physical Energy Summary Badges */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-neutral-100 dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800/80 flex flex-col gap-1">
+                <span className="text-[10px] text-neutral-400 uppercase font-mono">MOMENT MAGNITUDE</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-bold text-[#D71921]">Mw {currentMw.toFixed(1)}</span>
+                  <span className="text-[11px] text-neutral-500 font-mono">/ MMI {currentMmi}</span>
+                </div>
+                <span className="text-[10px] text-neutral-400 font-mono">Class: {currentMw >= 8.0 ? 'Great Mega-Thrust' : currentMw >= 7.0 ? 'Major Rupture' : 'Strong Ground Motion'}</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-neutral-100 dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800/80 flex flex-col gap-1">
+                <span className="text-[10px] text-neutral-400 uppercase font-mono">SEISMIC ENERGY RELEASE</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-bold text-neutral-900 dark:text-neutral-100">{energyDisplay}</span>
+                </div>
+                <span className="text-[10px] text-neutral-400 font-mono">E = {energyJoules.toExponential(2)} Joules</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-neutral-100 dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800/80 flex flex-col gap-1">
+                <span className="text-[10px] text-neutral-400 uppercase font-mono">ATOMIC BOMB EQUIVALENT</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-bold text-amber-500">{(tntTons / 15e3).toLocaleString(undefined, { maximumFractionDigits: 0 })}×</span>
+                  <span className="text-[10px] text-neutral-500">Hiroshima (15 kt)</span>
+                </div>
+                <span className="text-[10px] text-neutral-400 font-mono">Gutenberg-Richter Relation</span>
+              </div>
+            </div>
+
+            {/* Plotly Benchmark Horizontal Bar Chart */}
+            <div ref={richterPlotRef} className="w-full h-[290px]" />
+          </div>
+        );
+      })()}
 
     </div>
   );

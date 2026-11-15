@@ -64,9 +64,14 @@ export function DataIngestionPanel({
   };
 
   const earthquakeOptions = [
-    { value: 'elcentro', label: '1940 El Centro (Imperial Valley, CA - 0.348g)' },
-    { value: 'kobe', label: '1995 Kobe JMA (Hanshin High Velocity Pulse - 0.820g)' },
-    { value: 'northridge', label: '1994 Northridge (Sylmar Hospital Fling Step - 0.843g)' },
+    { value: 'elcentro', label: '1940 El Centro (Mw 6.9 • 0.35g • MMI VIII)' },
+    { value: 'kobe', label: '1995 Kobe JMA (Mw 6.9 • 0.82g • MMI IX • Velocity Pulse)' },
+    { value: 'northridge', label: '1994 Northridge (Mw 6.7 • 0.84g • MMI IX • Sylmar Fling)' },
+    { value: 'mexico1985', label: '1985 Mexico City (Mw 8.0 • 0.17g • MMI IX • 2.0s Lakebed Resonance)' },
+    { value: 'tohoku2011', label: '2011 Tohoku (Mw 9.1 • 1.25g • MMI X • Mega-Thrust Disaster)' },
+    { value: 'chichi1999', label: '1999 Chi-Chi (Mw 7.7 • 0.51g • MMI IX • Fling-Step Rupture)' },
+    { value: 'turkey2023', label: '2023 Turkey-Syria (Mw 7.8 • 1.11g • MMI X • Strike-Slip Rupture)' },
+    { value: 'shinozuka', label: 'Shinozuka Stochastic Benchmark (Mw 7.2 • Namazu 2025 Paper)' },
     { value: 'sweep', label: 'Synthetic Sine Sweep (1 Hz - 15 Hz Modal Test)' }
   ];
 
