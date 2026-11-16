@@ -82,12 +82,12 @@ ${trajectoryPoints.slice(0, 150).map(p => `  { ${p.t_ms}, ${p.target_step}, ${p.
  * 
  * Target Hardware: ESP32-S3 DevKit-C (Dual-Core Tensilica LX7 @ 240MHz)
  * Motor Drivers:   Dual Trinamic TMC2209 (Single-Wire UART + Step/Dir)
- * Sensor:          Analog Devices ADXL356 3-Axis Analog Accelerometer
+ * Sensor:          Analog Devices EVAL-ADXL355Z 20-Bit Digital SPI Accelerometer
  * Protocol:        Web Serial API @ 921,600 baud (USB-CDC Direct Stream)
  * 
  * OPTIMIZATIONS APPLIED:
  * 1. WiFi & Bluetooth RF radios completely unlinked and hardware disabled.
- *    - Eliminates radio EMI noise on the sensitive analog ADXL356 line.
+ *    - Eliminates radio EMI noise on the sensitive SPI accelerometer bus.
  *    - Frees up >120KB internal SRAM and avoids Wi-Fi/BT background ISR jitter.
  * 2. Asymmetric Dual-Core Architecture:
  *    - Core 1: Hard real-time stepper pulse ISR & deterministic motion planner.
@@ -473,7 +473,7 @@ void loop() {
                 ESP32-S3 FIRMWARE & PAYLOAD GENERATOR
               </h3>
               <p className="text-[10px] text-neutral-400 font-mono">
-                DUAL TMC2209 • ADXL356 SENSOR • {trajectoryPoints.length} TRAJECTORY STEPS
+                DUAL TMC2209 • ADXL355 SPI SENSOR • {trajectoryPoints.length} TRAJECTORY STEPS
               </p>
             </div>
           </div>

@@ -23,6 +23,33 @@ export function AnalyticsView({
 
   const isDark = theme === 'dark';
 
+  const safePlotlyReact = (element, data, layout, config) => {
+    if (!element) return;
+    try {
+      Plotly.react(element, data, layout, config).catch((err) => {
+        console.warn('Plotly render notice:', err?.message || err);
+      });
+    } catch (err) {
+      console.warn('Plotly synchronous notice:', err?.message || err);
+    }
+  };
+
+  // Window resize handler for analytics plots
+  useEffect(() => {
+    const handleResize = () => {
+      [psaPlotRef, husidPlotRef].forEach((ref) => {
+        if (ref.current && ref.current._fullLayout) {
+          try {
+            Plotly.Plots.resize(ref.current);
+          } catch (e) {}
+        }
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Compute Seismological & Engineering Ground Motion Metrics
   const engineeringMetrics = useMemo(() => {
     const time = dspResult.time || [];
@@ -193,7 +220,7 @@ export function AnalyticsView({
     };
 
     const config = { responsive: true, displayModeBar: false };
-    Plotly.newPlot(psaPlotRef.current, [trace], layout, config);
+    safePlotlyReact(psaPlotRef.current, [trace], layout, config);
   }, [responseSpectrum, isDark]);
 
   // Render Husid / Cumulative Energy Plot
@@ -238,7 +265,7 @@ export function AnalyticsView({
     };
 
     const config = { responsive: true, displayModeBar: false };
-    Plotly.newPlot(husidPlotRef.current, [trace], layout, config);
+    safePlotlyReact(husidPlotRef.current, [trace], layout, config);
   }, [engineeringMetrics.husidTime, engineeringMetrics.husidEnergy, isDark]);
 
   return (

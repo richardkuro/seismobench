@@ -135,18 +135,27 @@ export function SerialTerminalModal({
         {/* Quick Packets Bar */}
         <div className="px-5 py-2 border-b border-neutral-200 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-2 text-[11px] bg-neutral-100 dark:bg-[#141416]">
           <div className="flex items-center gap-1.5">
-            <span className="text-neutral-400 font-mono">QUICK:</span>
-            {['PING', 'STATUS', 'HOME', 'ESTOP'].map(cmd => (
+            <span className="text-neutral-400 font-mono">MACROS:</span>
+            {[
+              { label: 'PING', cmd: 'PING:SEISMOBENCH_V1' },
+              { label: 'STATUS', cmd: 'STATUS:QUERY' },
+              { label: 'HOME', cmd: 'HOME' },
+              { label: 'EXEC', cmd: 'EXEC:START' },
+              { label: 'RESET', cmd: 'RESET:ESTOP_CLEAR' },
+              { label: 'ESTOP', cmd: 'ESTOP:EMERGENCY_HALT' }
+            ].map(({ label, cmd }) => (
               <button
-                key={cmd}
-                onClick={() => onSendCommand(`{"cmd":"${cmd}"}`)}
+                key={label}
+                onClick={() => onSendCommand(cmd)}
                 className={`px-2.5 py-0.5 rounded-md font-mono border transition-all cursor-pointer ${
-                  cmd === 'ESTOP'
+                  label === 'ESTOP'
                     ? 'border-rose-500/40 text-rose-500 hover:bg-rose-500 hover:text-white font-bold'
+                    : label === 'RESET'
+                    ? 'border-amber-500/40 text-amber-500 hover:bg-amber-500 hover:text-black font-bold'
                     : 'border-neutral-300 dark:border-neutral-700 hover:border-neutral-500 text-neutral-700 dark:text-neutral-300'
                 }`}
               >
-                {cmd}
+                {label}
               </button>
             ))}
           </div>
@@ -226,7 +235,7 @@ export function SerialTerminalModal({
             type="text"
             value={commandInput}
             onChange={(e) => setCommandInput(e.target.value)}
-            placeholder="Type JSON command or ASCII (e.g. {'cmd':'SHAKE'})..."
+            placeholder="Type ASCII packet (e.g. PING, HOME, CFG:SENSOR=1, ESTOP)..."
             className="flex-1 bg-white dark:bg-[#060608] border border-neutral-300 dark:border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-900 dark:text-neutral-100 font-mono focus:outline-none focus:border-[#D71921]"
           />
           <button

@@ -34,7 +34,7 @@ export function ShakeTableVisualizer({
               <span className="text-[10px] text-neutral-400 font-mono">[ DUAL-GT2 ]</span>
             </h2>
             <p className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono uppercase tracking-wider">
-              CARRIAGE STROKE ENVELOPE // ADXL356 SENSOR LOOP
+              CARRIAGE STROKE ENVELOPE // ADXL355 SENSOR LOOP
             </p>
           </div>
         </div>
@@ -174,7 +174,7 @@ export function ShakeTableVisualizer({
             <circle cx="45" cy="34" r="1" fill="#FFFFFF" opacity="0.3" />
             <circle cx="68" cy="34" r="1" fill="#FFFFFF" opacity="0.3" />
 
-            {/* ADXL356 Accelerometer Board */}
+            {/* ADXL355 Accelerometer Board */}
             <rect x="33" y="14" width="24" height="20" rx="3" fill="#0C0C0E" stroke="#D71921" strokeWidth="1" />
             
             {/* Red sensor status LED */}
@@ -186,7 +186,7 @@ export function ShakeTableVisualizer({
               className={connectionState === 'RUNNING' ? "animate-ping" : ""}
             />
             <text x="45" y="31" fill="#FFFFFF" fontSize="5" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
-              ADXL356
+              ADXL355
             </text>
 
             {/* Center Pointer */}
@@ -213,7 +213,7 @@ export function ShakeTableVisualizer({
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-[#D71921] inline-block" />
-            <span>ADXL356</span>
+            <span>ADXL355</span>
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full border border-[#D71921] inline-block" />
