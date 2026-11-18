@@ -131,23 +131,18 @@ ${trajectoryPoints.slice(0, 150).map(p => `  { ${p.t_ms}, ${p.target_step}, ${p.
 #define PIN_DIR_R          19   // Right Direction (X2)
 #define PIN_EN             23   // Shared Enable (both Left & Right EN tied together, Active LOW)
 
-// Direct 32-bit GPIO Bitmasks (< 32)
-#define STEP_MASK ((1UL << PIN_STEP_L) | (1UL << PIN_STEP_R))
-#define DIR_MASK  ((1UL << PIN_DIR_L)  | (1UL << PIN_DIR_R))
-
 inline void IRAM_ATTR setStepDirection(bool forward) {
-  if (forward) {
-    GPIO.out_w1ts = DIR_MASK;
-  } else {
-    GPIO.out_w1tc = DIR_MASK;
-  }
+  digitalWrite(PIN_DIR_L, forward ? HIGH : LOW);
+  digitalWrite(PIN_DIR_R, forward ? HIGH : LOW);
 }
 
 inline void IRAM_ATTR pulseStepPins() {
-  GPIO.out_w1ts = STEP_MASK;
-  delayMicroseconds(1);
-  GPIO.out_w1tc = STEP_MASK;
-  delayMicroseconds(1);
+  digitalWrite(PIN_STEP_L, HIGH);
+  digitalWrite(PIN_STEP_R, HIGH);
+  delayMicroseconds(2);
+  digitalWrite(PIN_STEP_L, LOW);
+  digitalWrite(PIN_STEP_R, LOW);
+  delayMicroseconds(2);
 }
 
 // --- EVAL-ADXL355Z High-Precision 20-bit Digital Accelerometer (SPI) ---
