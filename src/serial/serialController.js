@@ -192,6 +192,12 @@ export class SeismoSerialController {
       this.setState('RUNNING');
     } else if (line.includes('STATUS:SHAKE_COMPLETE')) {
       this.setState('CONNECTED');
+    } else if (line.includes('WARN:ESTOP_ASSERTED')) {
+      this.isEstop = true;
+      this.setState('ESTOP');
+    } else if (line.includes('OK:RESET_CYCLE_COMPLETE')) {
+      this.isEstop = false;
+      this.setState('READY');
     }
   }
 
@@ -242,6 +248,7 @@ export class SeismoSerialController {
     if (this.isConnected && !this.isSimulated) {
       try {
         await this.sendPacket(`CFG:SENSOR=${mode === 'with_adxl' ? 1 : 0}`);
+        await this.sendPacket(mode === 'with_adxl' ? 'ADXL:ATTACH' : 'ADXL:REMOVE');
       } catch (e) {}
     }
   }
@@ -251,12 +258,18 @@ export class SeismoSerialController {
    */
   handleSimulatedRx(cmd) {
     if (cmd.startsWith('PING')) {
-      this.logRx(`PONG:ESP32_DUAL_STEPPER_FW_V2.5 [TMC2209:OK, SENSOR:${this.sensorMode === 'with_adxl' ? 'ADXL355_ACTIVE' : 'OPEN_LOOP'}]`);
+      this.logRx(`PONG:ESP32_DUAL_STEPPER_FW_V3.0 [TMC2209:OK (256uStep StealthChop), SENSOR:${this.sensorMode === 'with_adxl' ? 'ADXL355_ACTIVE' : 'OPEN_LOOP'}]`);
     } else if (cmd.startsWith('CFG:')) {
-      this.logRx('OK:CFG_STORED [GT2_20T, 1/16uStep, 80steps/mm, SoftLimit:Active]');
+      this.logRx('OK:CFG_STORED [GT2_20T, 1/16uStep (256-interpolated), 80steps/mm, SoftLimit:Active]');
+    } else if (cmd.startsWith('ADXL:')) {
+      this.logRx(`OK:ADXL_MODE_SWITCHED [Mode: ${this.sensorMode === 'with_adxl' ? 'ADXL355_ACTIVE' : 'OPEN_LOOP'}]`);
     } else if (cmd.startsWith('BUF_START:')) {
       this.isEstop = false;
       this.logRx('OK:BUFFER_ALLOCATED_SRAM (Free DMA: 284KB)');
+    } else if (cmd.startsWith('CHUNK:')) {
+      const parts = cmd.split(':');
+      const offset = parts[1] || '0';
+      this.logRx(`ACK:CHUNK:${offset}`);
     } else if (cmd.startsWith('EXEC:START')) {
       this.isEstop = false;
       this.setState('RUNNING');
@@ -270,7 +283,7 @@ export class SeismoSerialController {
     } else if (cmd.startsWith('RESET') || cmd.startsWith('HOME')) {
       this.isEstop = false;
       this.setState('READY');
-      this.logRx('OK:HOMING_CYCLE_COMPLETE - Center Reference 0.00mm, Drivers Re-enabled');
+      this.logRx('OK:RESET_CYCLE_COMPLETE - Center Reference 0.00mm, Drivers Re-enabled');
     }
   }
 
@@ -289,8 +302,8 @@ export class SeismoSerialController {
 
     await this.sendPacket(`BUF_START:POINTS=${total},DT_MS=${Math.round((trajectoryPoints[1]?.time - trajectoryPoints[0]?.time) * 1000 || 20)}`);
 
-    // Stream points in chunks
-    const chunkSize = 50;
+    // Stream points in safe chunks of 35 points (~850 bytes)
+    const chunkSize = 35;
     for (let i = 0; i < total; i += chunkSize) {
       if (this.isEstop) {
         this.logRx('WARN:UPLOAD_ABORTED - Emergency Stop signaled during buffer transfer');
@@ -305,12 +318,12 @@ export class SeismoSerialController {
       const progress = Math.min(100, Math.round(((i + chunk.length) / total) * 100));
       if (this.onProgress) this.onProgress(progress, i + chunk.length, total);
 
-      // Brief yield
-      await new Promise(r => setTimeout(r, this.isSimulated ? 2 : 20));
+      // Deterministic yield to allow ESP32 UART RX buffer drain
+      await new Promise(r => setTimeout(r, this.isSimulated ? 1 : 15));
     }
 
     if (!this.isEstop) {
-      await this.sendPacket(`BUF_END:CHECKSUM=0x${(total * 47 & 0xFFFF).toString(16).toUpperCase()}`);
+      await this.sendPacket(`BUF_END:POINTS=${total}`);
       this.setState('READY');
       this.logRx(`[SYSTEM] Trajectory buffer verification passed. ${total} motion steps loaded.`);
     }

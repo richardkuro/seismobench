@@ -78,20 +78,13 @@ ${trajectoryPoints.slice(0, 150).map(p => `  { ${p.t_ms}, ${p.target_step}, ${p.
 
   const esp32FirmwareCode = `/**
  * ============================================================================
- * SeismoBench ESP32-S3 Precision Dual-Stepper Shake Table Controller
+ * SeismoBench ESP32 Precision Dual-Stepper Shake Table Controller (Firmware v3.0)
  * 
- * Target Hardware: ESP32-S3 DevKit-C (Dual-Core Tensilica LX7 @ 240MHz)
+ * Target Hardware: ESP32 DevKit-C (Dual-Core Tensilica LX6 @ 240MHz)
  * Motor Drivers:   Dual Trinamic TMC2209 (Single-Wire UART + Step/Dir)
  * Sensor:          Analog Devices EVAL-ADXL355Z 20-Bit Digital SPI Accelerometer
+ *                  (with seamless Open-Loop Stepper Kinematics fallback on removal)
  * Protocol:        Web Serial API @ 921,600 baud (USB-CDC Direct Stream)
- * 
- * OPTIMIZATIONS APPLIED:
- * 1. WiFi & Bluetooth RF radios completely unlinked and hardware disabled.
- *    - Eliminates radio EMI noise on the sensitive SPI accelerometer bus.
- *    - Frees up >120KB internal SRAM and avoids Wi-Fi/BT background ISR jitter.
- * 2. Asymmetric Dual-Core Architecture:
- *    - Core 1: Hard real-time stepper pulse ISR & deterministic motion planner.
- *    - Core 0: High-speed Web Serial packet parser & 12-bit ADC telemetry stream.
  * ============================================================================
  */
 
@@ -108,7 +101,7 @@ ${trajectoryPoints.slice(0, 150).map(p => `  { ${p.t_ms}, ${p.target_step}, ${p.
 #define DRIVER_ADDRESS_R   0b01 // MS1 = VIO, MS2 = GND (Address 1)
 #define R_SENSE            0.11f // Standard for BTT TMC2209
 #define MOTOR_RMS_CURRENT  700  // Motor current in mA RMS
-#define MICROSTEPS         16   // 1/16 Microstepping
+#define MICROSTEPS         16   // 1/16 Microstepping (interpolated to 256)
 
 // --- Stepper Motor Pins (Verified Solder Pinout) ---
 #define PIN_STEP_L         25   // Left Step (X1)
@@ -120,7 +113,6 @@ ${trajectoryPoints.slice(0, 150).map(p => `  { ${p.t_ms}, ${p.target_step}, ${p.
 #define PIN_EN             23   // Shared Enable (both Left & Right EN tied together, Active LOW)
 
 // --- EVAL-ADXL355Z High-Precision 20-bit Digital Accelerometer (SPI) ---
-// Standard ESP32 (WROOM-32) Hardware SPI Pins (All adjacent on the left header rail)
 #define PIN_ADXL_CS        27   // Chip Select (~SS) -> D27
 #define PIN_ADXL_SCK       14   // SPI Clock (SCLK)  -> D14
 #define PIN_ADXL_MISO      12   // SPI MISO (SDO)   -> D12
@@ -134,6 +126,7 @@ ${trajectoryPoints.slice(0, 150).map(p => `  { ${p.t_ms}, ${p.target_step}, ${p.
 
 const float ADXL355_SCALE_2G = 256000.0f; // 256,000 LSB/g on +/-2g range
 #define SERIAL_BAUD        921600
+#define MAX_STEPS_PER_INTERVAL 250
 
 const float STEPS_PER_MM = ${stepsPerMm}f;
 
@@ -141,12 +134,16 @@ struct TrajectoryPoint {
   uint32_t t_ms;
   int32_t target_step;
   float disp_mm;
+  float accel_g;
 };
 
 #define MAX_POINTS 4096
 TrajectoryPoint trajectoryBuffer[MAX_POINTS];
 volatile uint16_t bufferPointCount = 0;
 volatile uint16_t bufferDtMs = 20;
+
+volatile bool sensorEnabled = true;
+bool adxlPresent = false;
 
 enum SystemState {
   STATE_IDLE,
@@ -165,6 +162,7 @@ TMC2209Stepper driverL(&DriverSerial, R_SENSE, DRIVER_ADDRESS_L);
 TMC2209Stepper driverR(&DriverSerial, R_SENSE, DRIVER_ADDRESS_R);
 
 TaskHandle_t motionTaskHandle = NULL;
+TaskHandle_t serialTaskHandle = NULL;
 SPISettings adxlSpiSettings(10000000, MSBFIRST, SPI_MODE0);
 
 uint8_t adxlReadByte(uint8_t reg) {
@@ -186,7 +184,25 @@ void adxlWriteByte(uint8_t reg, uint8_t val) {
   SPI.endTransaction();
 }
 
+bool probeADXL355() {
+  uint8_t devId = adxlReadByte(ADXL355_REG_DEVID_AD);
+  uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);
+  return (devId == 0xAD && partId == 0xED);
+}
+
+void configureADXL355() {
+  if (probeADXL355()) {
+    adxlPresent = true;
+    adxlWriteByte(ADXL355_REG_RANGE, 0x01);
+    adxlWriteByte(ADXL355_REG_POWER_CTL, 0x00);
+    delay(10);
+  } else {
+    adxlPresent = false;
+  }
+}
+
 float adxlReadAccelX() {
+  if (!adxlPresent) return 0.0f;
   SPI.beginTransaction(adxlSpiSettings);
   digitalWrite(PIN_ADXL_CS, LOW);
   SPI.transfer((ADXL355_REG_XDATA3 << 1) | 0x01);
@@ -212,6 +228,15 @@ void IRAM_ATTR executeStepPulse(bool dirForward) {
   delayMicroseconds(2);
 }
 
+void triggerEmergencyStop() {
+  emergencyStopFlag = true;
+  currentState = STATE_ESTOP;
+  digitalWrite(PIN_EN, HIGH);
+  digitalWrite(PIN_STEP_L, LOW);
+  digitalWrite(PIN_STEP_R, LOW);
+  Serial.println("WARN:ESTOP_ASSERTED - Stepper PWM Killed, Motor Power Cut Instantly");
+}
+
 void motionTaskCore1(void* parameter) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -219,8 +244,10 @@ void motionTaskCore1(void* parameter) {
 
     currentState = STATE_RUNNING;
     Serial.println("STATUS:SHAKING_ACTIVE [FreeRTOS Core 1 Motion Engine Active]");
-
     digitalWrite(PIN_EN, LOW);
+    delayMicroseconds(50);
+
+    uint32_t intervalDurationUs = bufferDtMs * 1000;
 
     for (uint16_t i = 0; i < bufferPointCount; i++) {
       if (emergencyStopFlag) break;
@@ -230,67 +257,180 @@ void motionTaskCore1(void* parameter) {
       bool forward = stepsToMove >= 0;
       int32_t absSteps = abs(stepsToMove);
 
-      uint32_t intervalStart = micros();
-      uint32_t intervalDurationUs = bufferDtMs * 1000;
+      if (absSteps > MAX_STEPS_PER_INTERVAL) {
+        absSteps = MAX_STEPS_PER_INTERVAL;
+      }
+
+      uint32_t intervalStartUs = micros();
 
       if (absSteps > 0) {
-        uint32_t stepIntervalUs = intervalDurationUs / absSteps;
-        if (stepIntervalUs < 10) stepIntervalUs = 10;
-
         for (int32_t s = 0; s < absSteps; s++) {
+          if (emergencyStopFlag) break;
+          uint32_t targetStepTime = intervalStartUs + (uint32_t)(((uint64_t)(s + 1) * intervalDurationUs) / absSteps);
+          while (micros() < targetStepTime) {
+            if (emergencyStopFlag) break;
+          }
           if (emergencyStopFlag) break;
           executeStepPulse(forward);
           currentStepPos += forward ? 1 : -1;
-          delayMicroseconds(stepIntervalUs);
         }
       }
 
-      float accel_g = 0.0f;
-      if (sensorEnabled && adxlPresent) {
-        accel_g = adxlReadAccelX();
-      } else {
-        accel_g = pt.accel_g;
-      }
-
+      float accel_g = (sensorEnabled && adxlPresent) ? adxlReadAccelX() : pt.accel_g;
       Serial.printf("TLM:%lu,%.5f,%.3f,%ld\\n", pt.t_ms, accel_g, pt.disp_mm, currentStepPos);
 
-      uint32_t elapsedUs = micros() - intervalStart;
-      if (elapsedUs < intervalDurationUs) {
-        delayMicroseconds(intervalDurationUs - elapsedUs);
+      while ((micros() - intervalStartUs) < intervalDurationUs) {
+        if (emergencyStopFlag) break;
       }
     }
 
     if (!emergencyStopFlag) {
       currentState = STATE_READY;
       Serial.println("STATUS:SHAKE_COMPLETE [Profile Finished, Carriage Idle at 0.00mm]");
+    } else {
+      digitalWrite(PIN_EN, HIGH);
     }
   }
 }
 
-void processChunkPayload(int offset, const String& payload) {
-  int startIdx = 0;
+void processChunkPayloadFast(int offset, char* payload) {
   int currentOffset = offset;
+  char* p = payload;
 
-  while (startIdx < payload.length() && currentOffset < MAX_POINTS) {
-    int nextSemi = payload.indexOf(';', startIdx);
-    String token = (nextSemi == -1) ? payload.substring(startIdx) : payload.substring(startIdx, nextSemi);
+  while (*p && currentOffset < MAX_POINTS) {
+    char* endPtr;
+    uint32_t t_ms = strtoul(p, &endPtr, 10);
+    if (*endPtr != ':') break;
+    p = endPtr + 1;
 
-    int c1 = token.indexOf(':');
-    int c2 = token.lastIndexOf(':');
+    int32_t step = strtol(p, &endPtr, 10);
+    if (*endPtr != ':') break;
+    p = endPtr + 1;
 
-    if (c1 > 0 && c2 > c1) {
-      uint32_t t_ms = token.substring(0, c1).toInt();
-      int32_t step = token.substring(c1 + 1, c2).toInt();
-      float disp = token.substring(c2 + 1).toFloat();
-
-      trajectoryBuffer[currentOffset].t_ms = t_ms;
-      trajectoryBuffer[currentOffset].target_step = step;
-      trajectoryBuffer[currentOffset].disp_mm = disp;
-      currentOffset++;
+    float disp = strtof(p, &endPtr);
+    float accel = 0.0f;
+    if (*endPtr == ':') {
+      p = endPtr + 1;
+      accel = strtof(p, &endPtr);
     }
+    p = endPtr;
 
-    if (nextSemi == -1) break;
-    startIdx = nextSemi + 1;
+    trajectoryBuffer[currentOffset].t_ms = t_ms;
+    trajectoryBuffer[currentOffset].target_step = step;
+    trajectoryBuffer[currentOffset].disp_mm = disp;
+    trajectoryBuffer[currentOffset].accel_g = accel;
+    currentOffset++;
+
+    if (*p == ';') p++; else break;
+  }
+}
+
+static char rxLineBuf[2048];
+static uint16_t rxLineIdx = 0;
+
+void handleCommand(char* cmd) {
+  if (strncmp(cmd, "ESTOP", 5) == 0) {
+    triggerEmergencyStop();
+    return;
+  }
+  if (strncmp(cmd, "RESET", 5) == 0 || strncmp(cmd, "HOME", 4) == 0) {
+    emergencyStopFlag = false;
+    currentStepPos = 0;
+    currentState = STATE_READY;
+    digitalWrite(PIN_EN, HIGH);
+    Serial.println("OK:RESET_CYCLE_COMPLETE - Center Reference 0.00mm, E-STOP Cleared, Drivers Ready");
+    return;
+  }
+  if (strncmp(cmd, "PING", 4) == 0) {
+    uint8_t verL = driverL.version();
+    uint8_t verR = driverR.version();
+    uint8_t partId = adxlPresent ? adxlReadByte(ADXL355_REG_PARTID) : 0x00;
+    Serial.printf("PONG:ESP32_DUAL_STEPPER_FW_V3.0 [TMC2209_L:0x%02X, TMC2209_R:0x%02X, SENSOR:%s (0x%02X)]\\n", 
+      verL, verR, (sensorEnabled && adxlPresent) ? "ADXL355_ACTIVE" : "OPEN_LOOP", partId);
+    return;
+  }
+  if (strncmp(cmd, "CFG:SENSOR=", 11) == 0) {
+    int sVal = atoi(cmd + 11);
+    sensorEnabled = (sVal != 0);
+    if (sensorEnabled && !adxlPresent) configureADXL355();
+    Serial.printf("OK:SENSOR_MODE_UPDATED [%s]\\n", (sensorEnabled && adxlPresent) ? "ADXL355_SPI_ACTIVE" : "OPEN_LOOP_STEPPER");
+    return;
+  }
+  if (strncmp(cmd, "ADXL:REMOVE", 11) == 0) {
+    sensorEnabled = false;
+    Serial.println("OK:ADXL_REMOVED - Switched to Open-Loop Stepper Telemetry");
+    return;
+  }
+  if (strncmp(cmd, "ADXL:ATTACH", 11) == 0) {
+    configureADXL355();
+    sensorEnabled = adxlPresent;
+    Serial.printf("OK:ADXL_ATTACH_PROBED [Detected: %s]\\n", adxlPresent ? "YES (ADXL355_ACTIVE)" : "NO (STILL_OPEN_LOOP)");
+    return;
+  }
+  if (strncmp(cmd, "BUF_START:", 10) == 0) {
+    emergencyStopFlag = false;
+    currentState = STATE_BUFFERING;
+    bufferPointCount = 0;
+    memset(trajectoryBuffer, 0, sizeof(trajectoryBuffer));
+
+    char* dtPtr = strstr(cmd, "DT_MS=");
+    if (dtPtr) {
+      bufferDtMs = atoi(dtPtr + 6);
+      if (bufferDtMs == 0) bufferDtMs = 20;
+    }
+    char* pPtr = strstr(cmd, "POINTS=");
+    if (pPtr) {
+      int total = atoi(pPtr + 7);
+      bufferPointCount = (total > MAX_POINTS) ? MAX_POINTS : total;
+    }
+    Serial.println("OK:BUFFER_ALLOCATED_SRAM (Free DMA: 284KB)");
+    return;
+  }
+  if (strncmp(cmd, "CHUNK:", 6) == 0) {
+    char* firstColon = cmd + 5;
+    char* secondColon = strchr(firstColon + 1, ':');
+    if (secondColon) {
+      int offset = atoi(firstColon + 1);
+      char* payload = secondColon + 1;
+      processChunkPayloadFast(offset, payload);
+      Serial.printf("ACK:CHUNK:%d\\n", offset);
+    }
+    return;
+  }
+  if (strncmp(cmd, "BUF_END:", 8) == 0) {
+    currentState = STATE_READY;
+    Serial.printf("STATUS:READY [Points: %d, Dt: %dms]\\n", bufferPointCount, bufferDtMs);
+    return;
+  }
+  if (strncmp(cmd, "EXEC:START", 10) == 0) {
+    if (currentState == STATE_READY && motionTaskHandle != NULL) {
+      emergencyStopFlag = false;
+      xTaskNotifyGive(motionTaskHandle);
+    } else {
+      Serial.println("WARN:NOT_READY_TO_EXECUTE");
+    }
+    return;
+  }
+}
+
+void serialTaskCore0(void* parameter) {
+  for (;;) {
+    while (Serial.available()) {
+      char c = Serial.read();
+      if (c == '\\r') continue;
+      if (c == '\\n') {
+        rxLineBuf[rxLineIdx] = '\\0';
+        if (rxLineIdx > 0) handleCommand(rxLineBuf);
+        rxLineIdx = 0;
+      } else {
+        if (rxLineIdx < sizeof(rxLineBuf) - 1) {
+          rxLineBuf[rxLineIdx++] = c;
+        } else {
+          rxLineIdx = 0;
+        }
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
 
@@ -310,16 +450,18 @@ void setup() {
   pinMode(PIN_EN, OUTPUT);
 
   digitalWrite(PIN_EN, HIGH);
+  digitalWrite(PIN_STEP_L, LOW);
+  digitalWrite(PIN_STEP_R, LOW);
 
   pinMode(PIN_ADXL_CS, OUTPUT);
   digitalWrite(PIN_ADXL_CS, HIGH);
   SPI.begin(PIN_ADXL_SCK, PIN_ADXL_MISO, PIN_ADXL_MOSI, PIN_ADXL_CS);
 
-  uint8_t devId = adxlReadByte(ADXL355_REG_DEVID_AD);
-  uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);
-  adxlWriteByte(ADXL355_REG_RANGE, 0x01); // +/- 2g
-  adxlWriteByte(ADXL355_REG_POWER_CTL, 0x00); // Measurement mode
-  delay(10);
+  configureADXL355();
+  if (!adxlPresent) {
+    sensorEnabled = false;
+    Serial.println("WARN:ADXL355_NOT_DETECTED - Initialized in Open-Loop Stepper Telemetry Mode");
+  }
 
   DriverSerial.begin(115200, SERIAL_8N1, PIN_TMC_RX, PIN_TMC_TX);
 
@@ -327,102 +469,37 @@ void setup() {
   driverL.toff(4);
   driverL.blank_time(24);
   driverL.rms_current(MOTOR_RMS_CURRENT);
+  driverL.mstep_reg_select(true);
   driverL.microsteps(MICROSTEPS);
+  driverL.intpol(true);
+  driverL.pdn_disable(true);
   driverL.en_spreadCycle(false);
   driverL.pwm_autoscale(true);
+  driverL.pwm_autograd(true);
+  driverL.pwm_freq(1);
 
   driverR.begin();
   driverR.toff(4);
   driverR.blank_time(24);
   driverR.rms_current(MOTOR_RMS_CURRENT);
+  driverR.mstep_reg_select(true);
   driverR.microsteps(MICROSTEPS);
+  driverR.intpol(true);
+  driverR.pdn_disable(true);
   driverR.en_spreadCycle(false);
   driverR.pwm_autoscale(true);
+  driverR.pwm_autograd(true);
+  driverR.pwm_freq(1);
 
-  xTaskCreatePinnedToCore(
-    motionTaskCore1,
-    "MotionEngineCore1",
-    8192,
-    NULL,
-    configMAX_PRIORITIES - 1,
-    &motionTaskHandle,
-    1
-  );
+  xTaskCreatePinnedToCore(motionTaskCore1, "MotionEngineCore1", 8192, NULL, configMAX_PRIORITIES - 2, &motionTaskHandle, 1);
+  xTaskCreatePinnedToCore(serialTaskCore0, "SerialSupervisorCore0", 8192, NULL, configMAX_PRIORITIES - 3, &serialTaskHandle, 0);
 
-  Serial.println("STATUS:READY [ESP32-S3 Dual-Core Firmware V2.4 Initialized]");
+  Serial.printf("STATUS:READY [ESP32 v3.0 Ready | SENSOR:%s | Dual TMC2209:OK (256-Interpolated StealthChop)]\\n", 
+    adxlPresent ? "ADXL355_SPI" : "OPEN_LOOP_FALLBACK");
 }
 
 void loop() {
-  if (Serial.available()) {
-    String line = Serial.readStringUntil('\\n');
-    line.trim();
-    if (line.length() == 0) return;
-
-    if (line.startsWith("PING")) {
-      uint8_t verL = driverL.version();
-      uint8_t verR = driverR.version();
-      uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);
-      Serial.printf("PONG:ESP32-S3_DUAL_STEPPER_FW_V2.4 [TMC2209_L:0x%02X, TMC2209_R:0x%02X, ADXL355:0x%02X]\\n", verL, verR, partId);
-    }
-    else if (line.startsWith("BUF_START:")) {
-      emergencyStopFlag = false;
-      currentState = STATE_BUFFERING;
-      bufferPointCount = 0;
-
-      int dtIdx = line.indexOf("DT_MS=");
-      if (dtIdx > 0) {
-        bufferDtMs = line.substring(dtIdx + 6).toInt();
-        if (bufferDtMs == 0) bufferDtMs = 20;
-      }
-
-      int pIdx = line.indexOf("POINTS=");
-      if (pIdx > 0) {
-        int endP = line.indexOf(',', pIdx);
-        int total = (endP == -1) ? line.substring(pIdx + 7).toInt() : line.substring(pIdx + 7, endP).toInt();
-        bufferPointCount = (total > MAX_POINTS) ? MAX_POINTS : total;
-      }
-      Serial.println("OK:BUFFER_ALLOCATED_SRAM (Free DMA: 284KB)");
-    }
-    else if (line.startsWith("CHUNK:")) {
-      int firstColon = line.indexOf(':');
-      int secondColon = line.indexOf(':', firstColon + 1);
-      if (firstColon > 0 && secondColon > firstColon) {
-        int offset = line.substring(firstColon + 1, secondColon).toInt();
-        String payload = line.substring(secondColon + 1);
-        processChunkPayload(offset, payload);
-      }
-    }
-    else if (line.startsWith("BUF_END:")) {
-      currentState = STATE_READY;
-      Serial.println("STATUS:READY");
-    }
-    else if (line.startsWith("EXEC:START")) {
-      if (currentState == STATE_READY && motionTaskHandle != NULL) {
-        emergencyStopFlag = false;
-        xTaskNotifyGive(motionTaskHandle);
-      } else {
-        Serial.println("WARN:NOT_READY_TO_EXECUTE");
-      }
-    }
-    else if (line.startsWith("CFG:SENSOR=")) {
-      int sVal = line.substring(11).toInt();
-      sensorEnabled = (sVal != 0);
-      Serial.printf("OK:SENSOR_MODE_UPDATED [%s]\\n", (sensorEnabled && adxlPresent) ? "ADXL355_SPI_ACTIVE" : "OPEN_LOOP_STEPPER");
-    }
-    else if (line.startsWith("ESTOP")) {
-      emergencyStopFlag = true;
-      currentState = STATE_ESTOP;
-      digitalWrite(PIN_EN, HIGH);
-      Serial.println("WARN:ESTOP_ASSERTED - Stepper PWM Killed, Table Disabled");
-    }
-    else if (line.startsWith("RESET") || line.startsWith("HOME")) {
-      emergencyStopFlag = false;
-      currentStepPos = 0;
-      currentState = STATE_READY;
-      digitalWrite(PIN_EN, HIGH);
-      Serial.println("OK:RESET_CYCLE_COMPLETE - Center Reference 0.00mm, E-STOP Cleared, Drivers Ready");
-    }
-  }
+  vTaskDelay(pdMS_TO_TICKS(1000));
 }
 `;
 

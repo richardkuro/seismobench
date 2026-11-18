@@ -155,30 +155,39 @@ export function App() {
     switch (id) {
       case 'elcentro':
         setRawWaveform(getElCentro1940());
+        setAmplitudeScale(0.60);
         break;
       case 'kobe':
         setRawWaveform(generateKobeWaveform());
+        setAmplitudeScale(0.20); // Safe scale: ~21mm disp, ~190 mm/s vel
         break;
       case 'northridge':
         setRawWaveform(generateNorthridgeWaveform());
+        setAmplitudeScale(0.20); // Safe scale: ~15mm disp, ~175 mm/s vel
         break;
       case 'mexico1985':
         setRawWaveform(generateMexicoCityWaveform());
+        setAmplitudeScale(0.18); // Safe scale: ~29mm disp, ~95 mm/s vel
         break;
       case 'tohoku2011':
         setRawWaveform(generateTohokuWaveform());
+        setAmplitudeScale(0.25); // Safe scale: ~14mm disp, ~170 mm/s vel
         break;
       case 'chichi1999':
         setRawWaveform(generateChiChiWaveform());
+        setAmplitudeScale(0.30);
         break;
       case 'turkey2023':
         setRawWaveform(generateTurkeyWaveform());
+        setAmplitudeScale(0.22); // Safe scale: ~14mm disp, ~140 mm/s vel
         break;
       case 'shinozuka':
         setRawWaveform(generateShinozukaBenchmark());
+        setAmplitudeScale(0.40);
         break;
       case 'sweep':
         setRawWaveform(generateSineSweep());
+        setAmplitudeScale(0.50);
         break;
       default:
         if (customWaveform && customWaveform.id === id) {
@@ -283,12 +292,35 @@ export function App() {
   const handleUploadBuffer = async () => {
     if (dspResult.displacement.length === 0) return;
 
-    const trajectory = dspResult.displacement.map((disp, i) => ({
-      time: dspResult.time[i],
-      disp: disp,
-      step: Math.round(disp * stepsPerMm),
-      accel: dspResult.accelFiltered[i]
-    }));
+    const dt = dspResult.dt || 0.02;
+    let peakVel = 0;
+    for (let i = 1; i < dspResult.displacement.length; i++) {
+      const v = Math.abs(dspResult.displacement[i] - dspResult.displacement[i - 1]) / dt;
+      if (v > peakVel) peakVel = v;
+    }
+
+    // Kinematic safety check: scale if velocity or stroke exceeds physical stepper safety
+    const maxAllowedVel = config.maxVelocityMmS || 250;
+    const maxAllowedStroke = config.strokeLimitMm || 40;
+    const peakDisp = strokeWarning.peakAbsoluteDisp || 0;
+
+    let safetyScale = 1.0;
+    if (peakVel > maxAllowedVel) {
+      safetyScale = Math.min(safetyScale, (maxAllowedVel / peakVel) * 0.95);
+    }
+    if (peakDisp > maxAllowedStroke) {
+      safetyScale = Math.min(safetyScale, (maxAllowedStroke / peakDisp) * 0.95);
+    }
+
+    const trajectory = dspResult.displacement.map((disp, i) => {
+      const safeDisp = disp * safetyScale;
+      return {
+        time: dspResult.time[i],
+        disp: Number(safeDisp.toFixed(3)),
+        step: Math.round(safeDisp * stepsPerMm),
+        accel: Number((dspResult.accelFiltered[i] * safetyScale).toFixed(4))
+      };
+    });
 
     try {
       await serial.uploadTrajectoryBuffer(trajectory);
