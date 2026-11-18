@@ -53,12 +53,12 @@
 #define PIN_DIR_R          19   // Right Direction (X2)
 #define PIN_EN             23   // Shared Enable (both Left & Right EN tied together, Active LOW)
 
-inline void IRAM_ATTR setStepDirection(bool forward) {
+inline void setStepDirection(bool forward) {
   digitalWrite(PIN_DIR_L, forward ? HIGH : LOW);
   digitalWrite(PIN_DIR_R, forward ? HIGH : LOW);
 }
 
-inline void IRAM_ATTR pulseStepPins() {
+inline void pulseStepPins() {
   digitalWrite(PIN_STEP_L, HIGH);
   digitalWrite(PIN_STEP_R, HIGH);
   delayMicroseconds(2);
