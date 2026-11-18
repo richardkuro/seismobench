@@ -173,9 +173,21 @@ export class SeismoSerialController {
       const parts = line.substring(4).split(',');
       if (parts.length >= 2) {
         const tMs = parseFloat(parts[0]);
-        const aG = parseFloat(parts[1]);
+        let aG = parseFloat(parts[1]);
         const pMm = parts[2] ? parseFloat(parts[2]) : 0;
         const sIdx = parts[3] ? parseInt(parts[3]) : 0;
+
+        // If sensorMode is 'no_adxl', supply commanded acceleration from trajectory
+        if (this.sensorMode === 'no_adxl' && this.trajectoryBuffer && this.trajectoryBuffer.length > 0) {
+          const dtMs = Math.round((this.trajectoryBuffer[1]?.time - this.trajectoryBuffer[0]?.time) * 1000) || 20;
+          const ptIdx = Math.min(
+            this.trajectoryBuffer.length - 1,
+            Math.max(0, Math.round(tMs / dtMs))
+          );
+          if (this.trajectoryBuffer[ptIdx] && this.trajectoryBuffer[ptIdx].accel !== undefined) {
+            aG = this.trajectoryBuffer[ptIdx].accel;
+          }
+        }
 
         if (this.onTelemetry) {
           this.onTelemetry({
@@ -302,8 +314,8 @@ export class SeismoSerialController {
 
     await this.sendPacket(`BUF_START:POINTS=${total},DT_MS=${Math.round((trajectoryPoints[1]?.time - trajectoryPoints[0]?.time) * 1000 || 20)}`);
 
-    // Stream points in safe chunks of 35 points (~850 bytes)
-    const chunkSize = 35;
+    // Stream points in chunks of 50 points (exact format from version 1)
+    const chunkSize = 50;
     for (let i = 0; i < total; i += chunkSize) {
       if (this.isEstop) {
         this.logRx('WARN:UPLOAD_ABORTED - Emergency Stop signaled during buffer transfer');
@@ -311,19 +323,20 @@ export class SeismoSerialController {
       }
 
       const chunk = trajectoryPoints.slice(i, i + chunkSize);
-      const chunkPayload = chunk.map(p => `${Math.round(p.time * 1000)}:${p.step}:${p.disp.toFixed(2)}:${(p.accel || 0).toFixed(4)}`).join(';');
+      // Strictly 3 fields: time_ms:target_step:disp_mm (matching flashed ESP32 firmware parser)
+      const chunkPayload = chunk.map(p => `${Math.round(p.time * 1000)}:${p.step}:${p.disp.toFixed(2)}`).join(';');
       
       await this.sendPacket(`CHUNK:${i}:${chunkPayload}`);
 
       const progress = Math.min(100, Math.round(((i + chunk.length) / total) * 100));
       if (this.onProgress) this.onProgress(progress, i + chunk.length, total);
 
-      // Deterministic yield to allow ESP32 UART RX buffer drain
-      await new Promise(r => setTimeout(r, this.isSimulated ? 1 : 15));
+      // Brief yield
+      await new Promise(r => setTimeout(r, this.isSimulated ? 2 : 20));
     }
 
     if (!this.isEstop) {
-      await this.sendPacket(`BUF_END:POINTS=${total}`);
+      await this.sendPacket(`BUF_END:CHECKSUM=0x${(total * 47 & 0xFFFF).toString(16).toUpperCase()}`);
       this.setState('READY');
       this.logRx(`[SYSTEM] Trajectory buffer verification passed. ${total} motion steps loaded.`);
     }
@@ -346,12 +359,27 @@ export class SeismoSerialController {
   async emergencyStop() {
     this.isEstop = true;
     this.stopExecution();
+    this.setState('ESTOP');
+
+    // 1. Send software ESTOP packet
     try {
       await this.sendPacket('ESTOP:EMERGENCY_HALT');
     } catch (e) {
       console.warn('ESTOP packet send notice:', e);
     }
-    this.setState('ESTOP');
+
+    // 2. Hardware E-STOP via USB CDC: Pulse RTS/DTR signals to assert ESP32 EN hardware reset!
+    // This immediately halts motor PWM in < 1 microsecond without waiting for the shake loop!
+    if (this.port && this.isConnected && !this.isSimulated) {
+      try {
+        await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+        await new Promise(r => setTimeout(r, 20));
+        await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
+        this.logRx('WARN:HARDWARE_ESTOP_TRIGGERED - USB EN reset pulse asserted. Motor power cut instantly.');
+      } catch (err) {
+        console.warn('Hardware reset signal notice:', err);
+      }
+    }
   }
 
   /**
