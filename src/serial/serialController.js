@@ -337,6 +337,8 @@ export class SeismoSerialController {
 
     if (!this.isEstop) {
       await this.sendPacket(`BUF_END:CHECKSUM=0x${(total * 47 & 0xFFFF).toString(16).toUpperCase()}`);
+      // Settle delay so ESP32 serial ISR processes BUF_END and sets STATE_READY
+      await new Promise(r => setTimeout(r, 80));
       this.setState('READY');
       this.logRx(`[SYSTEM] Trajectory buffer verification passed. ${total} motion steps loaded.`);
     }

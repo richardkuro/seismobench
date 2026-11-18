@@ -144,50 +144,45 @@ export function App() {
     };
   }, [serial]);
 
+  // Cache last uploaded trajectory signature to avoid redundant re-transfers and eliminate tap latency
+  const lastLoadedSignatureRef = useRef('');
+
   // Handle Earthquake Selection (Supports all 9 preloaded earthquakes + Custom CSV)
   const handleSelectEarthquake = (id) => {
     setSelectedEarthquakeId(id);
     setTelemetryStream([]);
     setCurrentCarriage({ dispMm: 0, accelG: 0, velocityMmS: 0 });
-    // Invalidate serial trajectory buffer so next execute re-uploads the new record!
+    // Invalidate serial trajectory buffer so next execute uploads fresh record!
+    lastLoadedSignatureRef.current = '';
     serial.clearTrajectoryBuffer();
 
     switch (id) {
       case 'elcentro':
         setRawWaveform(getElCentro1940());
-        setAmplitudeScale(0.60);
         break;
       case 'kobe':
         setRawWaveform(generateKobeWaveform());
-        setAmplitudeScale(0.20); // Safe scale: ~21mm disp, ~190 mm/s vel
         break;
       case 'northridge':
         setRawWaveform(generateNorthridgeWaveform());
-        setAmplitudeScale(0.20); // Safe scale: ~15mm disp, ~175 mm/s vel
         break;
       case 'mexico1985':
         setRawWaveform(generateMexicoCityWaveform());
-        setAmplitudeScale(0.18); // Safe scale: ~29mm disp, ~95 mm/s vel
         break;
       case 'tohoku2011':
         setRawWaveform(generateTohokuWaveform());
-        setAmplitudeScale(0.25); // Safe scale: ~14mm disp, ~170 mm/s vel
         break;
       case 'chichi1999':
         setRawWaveform(generateChiChiWaveform());
-        setAmplitudeScale(0.30);
         break;
       case 'turkey2023':
         setRawWaveform(generateTurkeyWaveform());
-        setAmplitudeScale(0.22); // Safe scale: ~14mm disp, ~140 mm/s vel
         break;
       case 'shinozuka':
         setRawWaveform(generateShinozukaBenchmark());
-        setAmplitudeScale(0.40);
         break;
       case 'sweep':
         setRawWaveform(generateSineSweep());
-        setAmplitudeScale(0.50);
         break;
       default:
         if (customWaveform && customWaveform.id === id) {
@@ -198,6 +193,7 @@ export function App() {
   };
 
   const handleUploadCustomCSV = (parsedData) => {
+    lastLoadedSignatureRef.current = '';
     setCustomWaveform(parsedData);
     setSelectedEarthquakeId(parsedData.id);
     setRawWaveform(parsedData);
@@ -292,35 +288,13 @@ export function App() {
   const handleUploadBuffer = async () => {
     if (dspResult.displacement.length === 0) return;
 
-    const dt = dspResult.dt || 0.02;
-    let peakVel = 0;
-    for (let i = 1; i < dspResult.displacement.length; i++) {
-      const v = Math.abs(dspResult.displacement[i] - dspResult.displacement[i - 1]) / dt;
-      if (v > peakVel) peakVel = v;
-    }
-
-    // Kinematic safety check: scale if velocity or stroke exceeds physical stepper safety
-    const maxAllowedVel = config.maxVelocityMmS || 250;
-    const maxAllowedStroke = config.strokeLimitMm || 40;
-    const peakDisp = strokeWarning.peakAbsoluteDisp || 0;
-
-    let safetyScale = 1.0;
-    if (peakVel > maxAllowedVel) {
-      safetyScale = Math.min(safetyScale, (maxAllowedVel / peakVel) * 0.95);
-    }
-    if (peakDisp > maxAllowedStroke) {
-      safetyScale = Math.min(safetyScale, (maxAllowedStroke / peakDisp) * 0.95);
-    }
-
-    const trajectory = dspResult.displacement.map((disp, i) => {
-      const safeDisp = disp * safetyScale;
-      return {
-        time: dspResult.time[i],
-        disp: Number(safeDisp.toFixed(3)),
-        step: Math.round(safeDisp * stepsPerMm),
-        accel: Number((dspResult.accelFiltered[i] * safetyScale).toFixed(4))
-      };
-    });
+    // Direct, uncorrupted trajectory formulation (matching Build 1)
+    const trajectory = dspResult.displacement.map((disp, i) => ({
+      time: dspResult.time[i],
+      disp: Number(disp.toFixed(2)),
+      step: Math.round(disp * stepsPerMm),
+      accel: dspResult.accelFiltered[i]
+    }));
 
     try {
       await serial.uploadTrajectoryBuffer(trajectory);
@@ -336,8 +310,17 @@ export function App() {
       if (serial.isEstop || connectionState === 'ESTOP') {
         await serial.resetEstop();
       }
-      // Always upload fresh trajectory buffer of currently selected earthquake & scaling
-      await handleUploadBuffer();
+
+      // Check if current trajectory is already loaded into the ESP32 SRAM
+      const currentSignature = `${selectedEarthquakeId}_${amplitudeScale}_${timeScale}_${stepsPerMm}_${dspResult.displacement.length}`;
+      if (lastLoadedSignatureRef.current !== currentSignature || serial.trajectoryBuffer.length === 0) {
+        await handleUploadBuffer();
+        // Give ESP32 time to parse BUF_END and transition into STATE_READY
+        await new Promise(r => setTimeout(r, 120));
+        lastLoadedSignatureRef.current = currentSignature;
+      }
+
+      // Starts immediately on the first tap!
       await serial.executeShake();
     } catch (err) {
       alert(`Shake execution notice: ${err.message}`);
@@ -476,20 +459,29 @@ export function App() {
                   onUploadCustomCSV={handleUploadCustomCSV}
                   waveformMeta={waveformMeta}
                   amplitudeScale={amplitudeScale}
-                  onChangeAmplitudeScale={setAmplitudeScale}
+                  onChangeAmplitudeScale={(scale) => {
+                    lastLoadedSignatureRef.current = '';
+                    setAmplitudeScale(scale);
+                  }}
                   timeScale={timeScale}
-                  onChangeTimeScale={setTimeScale}
+                  onChangeTimeScale={(scale) => {
+                    lastLoadedSignatureRef.current = '';
+                    setTimeScale(scale);
+                  }}
                 />
 
                 <ConfigSidebar
                   config={config}
-                  onChangeConfig={(patch) => setConfig(prev => ({ ...prev, ...patch }))}
+                  onChangeConfig={(patch) => {
+                    lastLoadedSignatureRef.current = '';
+                    setConfig(prev => ({ ...prev, ...patch }));
+                  }}
                   strokeWarning={strokeWarning}
                   onApplyRecommendedScale={handleApplyRecommendedScale}
                 />
               </div>
 
-              {/* Right Column: 5 Engineering Graphs (8 Cols) */}
+              {/* Right Column: 5 Engineering Graphs & Live Serial Monitor (8 Cols) */}
               <div className="lg:col-span-8 flex flex-col gap-6">
                 <GraphsDashboard
                   timeArray={dspResult.time}
@@ -506,27 +498,27 @@ export function App() {
                   waveformMeta={waveformMeta}
                   sensorMode={sensorMode}
                 />
+
+                {/* Live Serial Monitor & Packet Stream Widget on Right Side */}
+                <LiveSerialMonitorWidget
+                  packetLog={packetLog}
+                  onClearLog={() => setPacketLog([])}
+                  onSendCommand={handleSendCommand}
+                  connectionState={connectionState}
+                  isSimulated={isSimulated}
+                  sensorMode={sensorMode}
+                  onToggleSensorMode={handleToggleSensorMode}
+                  onConnectPhysical={handleConnectPhysical}
+                  onStartSimulation={handleStartSimulation}
+                  onDisconnect={handleDisconnect}
+                  onResetEstop={handleResetEstop}
+                  onEmergencyStop={handleEmergencyStop}
+                  onHomeTable={handleHomeTable}
+                  baudRate={baudRate}
+                />
               </div>
 
             </div>
-
-            {/* Live Serial Monitor & Packet Stream Widget Directly on Bench View */}
-            <LiveSerialMonitorWidget
-              packetLog={packetLog}
-              onClearLog={() => setPacketLog([])}
-              onSendCommand={handleSendCommand}
-              connectionState={connectionState}
-              isSimulated={isSimulated}
-              sensorMode={sensorMode}
-              onToggleSensorMode={handleToggleSensorMode}
-              onConnectPhysical={handleConnectPhysical}
-              onStartSimulation={handleStartSimulation}
-              onDisconnect={handleDisconnect}
-              onResetEstop={handleResetEstop}
-              onEmergencyStop={handleEmergencyStop}
-              onHomeTable={handleHomeTable}
-              baudRate={baudRate}
-            />
           </div>
         )}
 

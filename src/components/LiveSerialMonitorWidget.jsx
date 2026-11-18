@@ -38,15 +38,16 @@ export function LiveSerialMonitorWidget({
   const [autoscroll, setAutoscroll] = useState(true);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isMaximized, setIsMaximized] = useState(false);
-  const logEndRef = useRef(null);
+  const logContainerRef = useRef(null);
 
   const isConnected = connectionState !== 'DISCONNECTED';
   const isEstop = connectionState === 'ESTOP';
   const isRunning = connectionState === 'RUNNING';
 
+  // Only scroll the internal terminal container, NEVER scroll the browser window!
   useEffect(() => {
-    if (autoscroll && logEndRef.current && isExpanded) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoscroll && logContainerRef.current && isExpanded) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [packetLog, autoscroll, isExpanded]);
 
@@ -257,6 +258,7 @@ export function LiveSerialMonitorWidget({
 
           {/* Terminal Console View */}
           <div 
+            ref={logContainerRef}
             className={`w-full overflow-y-auto p-3.5 font-mono text-[11px] leading-relaxed select-text transition-all ${
               isMaximized ? 'h-[400px]' : 'h-[180px]'
             } bg-white dark:bg-[#08080a]`}
@@ -303,7 +305,6 @@ export function LiveSerialMonitorWidget({
                     </div>
                   );
                 })}
-                <div ref={logEndRef} />
               </div>
             )}
           </div>
