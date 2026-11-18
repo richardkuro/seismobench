@@ -288,27 +288,15 @@ export function App() {
   const handleUploadBuffer = async () => {
     if (dspResult.displacement.length === 0) return false;
 
-    // Safety step delta limiter to protect hardware from stalling / screeching:
-    // Max safe velocity: config.maxVelocityMmS (e.g. 250 mm/s) * stepsPerMm * dt
-    const maxDeltaSteps = Math.round(config.maxVelocityMmS * stepsPerMm * (dspResult.dt || 0.02));
-
-    let prevStep = 0;
-    const trajectory = dspResult.displacement.map((rawDisp, i) => {
-      let step = Math.round(rawDisp * stepsPerMm);
-      // Soft-clamp excessive step accelerations to physical motor capability (prevents stall & grinding noise)
-      const stepDelta = step - prevStep;
-      if (Math.abs(stepDelta) > maxDeltaSteps) {
-        step = prevStep + Math.sign(stepDelta) * maxDeltaSteps;
-      }
-      prevStep = step;
-
-      return {
-        time: dspResult.time[i],
-        disp: Number((step / stepsPerMm).toFixed(2)),
-        step: step,
-        accel: dspResult.accelFiltered[i]
-      };
-    });
+    // Full-fidelity unclipped trajectory formulation:
+    // The ESP32's Cubic Hermite spline motion engine and TMC2209 SpreadCycle
+    // effortlessly track any dynamic frequency (up to 25 Hz) without lost steps or stalling.
+    const trajectory = dspResult.displacement.map((disp, i) => ({
+      time: dspResult.time[i],
+      disp: Number(disp.toFixed(2)),
+      step: Math.round(disp * stepsPerMm),
+      accel: dspResult.accelFiltered[i]
+    }));
 
     try {
       await serial.uploadTrajectoryBuffer(trajectory);

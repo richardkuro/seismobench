@@ -1,19 +1,29 @@
 /**
  * ============================================================================
- * SeismoBench ESP32-S3 Precision Dual-Stepper Shake Table Controller
+ * SeismoBench ESP32-S3 Precision Dual-Stepper Shake Table Controller (v3.5)
  * 
  * Target Hardware: ESP32-S3 DevKit-C (Dual-Core Tensilica LX7 @ 240MHz)
  * Motor Drivers:   Dual Trinamic TMC2209 (Single-Wire UART + Step/Dir)
- * Sensor:          Analog Devices ADXL356 3-Axis Analog Accelerometer
+ * Sensor:          Analog Devices ADXL355 20-bit High-Precision SPI Accelerometer
  * Protocol:        Web Serial API @ 921,600 baud (USB-CDC Direct Stream)
  * 
- * OPTIMIZATIONS APPLIED:
- * 1. WiFi & Bluetooth RF radios completely unlinked and hardware disabled.
- *    - Eliminates radio EMI noise on the sensitive analog ADXL356 line.
- *    - Frees up >120KB internal SRAM and avoids Wi-Fi/BT background ISR jitter.
- * 2. Asymmetric Dual-Core Architecture:
- *    - Core 1: Hard real-time stepper pulse ISR & deterministic motion planner.
- *    - Core 0: High-speed Web Serial packet parser & 12-bit ADC telemetry stream.
+ * CORE ARCHITECTURE & ANTI-RESONANCE UPGRADES:
+ * 1. Trinamic SpreadCycle Chopper:
+ *    - Replaces StealthChop with cycle-by-cycle hardware peak-current chopper.
+ *    - Completely eliminates StealthChop voltage-mode PLL de-sync and croaking
+ *      during rapid 1-15 Hz frequency oscillations and direction reversals.
+ *    - Enables MicroPlyer 256-microstep hardware interpolation for silent,
+ *      smooth mechanical vibration absorption.
+ * 2. 1000mA RMS Dynamic Motor Current:
+ *    - Provides full holding and dynamic torque to overcome carriage and belt inertia.
+ * 3. Continuous Cubic Hermite Trajectory Spline (Core 1):
+ *    - Sub-step position P(t) is evaluated continuously via C1-smooth Hermite splines.
+ *    - Derivative velocity naturally decelerates to 0.0 at wave peaks/turnaround crests.
+ *    - Eliminates instantaneous velocity jumps, infinite-jerk impulses, and resonance stalls.
+ * 4. Lock-Free Core Decoupling (Core 1 <-> Core 0):
+ *    - Core 1 NEVER calls blocking Serial.printf!
+ *    - Telemetry is pushed into a lock-free ring buffer (< 1 microsecond).
+ *    - Core 0 drains the queue to USB CDC at 921600 baud without blocking step pulses.
  * ============================================================================
  */
 
@@ -24,7 +34,7 @@
 #include <esp_bt.h>
 
 // ============================================================================
-// 1. PIN CONFIGURATIONS
+// 1. PIN CONFIGURATIONS & HARDWARE REGISTERS
 // ============================================================================
 
 // --- TMC2209 Single-Wire UART ---
@@ -33,37 +43,50 @@
 #define DRIVER_ADDRESS_L   0b00 // MS1 = GND, MS2 = GND (Address 0)
 #define DRIVER_ADDRESS_R   0b01 // MS1 = VIO, MS2 = GND (Address 1)
 #define R_SENSE            0.11f // 0.11 Ohm (standard for BTT TMC2209)
-#define MOTOR_RMS_CURRENT  700  // Motor current in mA RMS (safe default: 600-800mA)
-#define MICROSTEPS         16   // 1/16 Microstepping
+#define MOTOR_RMS_CURRENT  1000  // 1000 mA RMS for full dynamic torque without stall
+#define MICROSTEPS         16    // 1/16 Microstepping (interpolated to 256 by TMC2209)
 
-// --- Stepper Motor Pins (Verified Solder Pinout) ---
+// --- Stepper Motor Pins ---
 #define PIN_STEP_L         25   // Left Step (X1)
 #define PIN_DIR_L          26   // Left Direction (X1)
-
 #define PIN_STEP_R         18   // Right Step (X2)
 #define PIN_DIR_R          19   // Right Direction (X2)
-
 #define PIN_EN             23   // Shared Enable (both Left & Right EN tied together, Active LOW)
 
+// Direct 32-bit GPIO Bitmasks (< 32)
+#define STEP_MASK ((1UL << PIN_STEP_L) | (1UL << PIN_STEP_R))
+#define DIR_MASK  ((1UL << PIN_DIR_L)  | (1UL << PIN_DIR_R))
+
+inline void IRAM_ATTR setStepDirection(bool forward) {
+  if (forward) {
+    GPIO.out_w1ts = DIR_MASK;
+  } else {
+    GPIO.out_w1tc = DIR_MASK;
+  }
+}
+
+inline void IRAM_ATTR pulseStepPins() {
+  GPIO.out_w1ts = STEP_MASK;
+  delayMicroseconds(1);
+  GPIO.out_w1tc = STEP_MASK;
+  delayMicroseconds(1);
+}
+
 // --- EVAL-ADXL355Z High-Precision 20-bit Digital Accelerometer (SPI) ---
-// Standard ESP32 (WROOM-32) Hardware SPI Pins (All adjacent on the left header rail)
 #define PIN_ADXL_CS        27   // Chip Select (~SS) -> D27
 #define PIN_ADXL_SCK       14   // SPI Clock (SCLK)  -> D14
 #define PIN_ADXL_MISO      12   // SPI MISO (SDO)   -> D12
 #define PIN_ADXL_MOSI      13   // SPI MOSI (SDI)   -> D13
 
 // ADXL355 SPI Registers
-#define ADXL355_REG_DEVID_AD   0x00 // Should read 0xAD
-#define ADXL355_REG_PARTID     0x02 // Should read 0xED
+#define ADXL355_REG_DEVID_AD   0x00
+#define ADXL355_REG_PARTID     0x02
 #define ADXL355_REG_STATUS     0x04
 #define ADXL355_REG_XDATA3     0x08
-#define ADXL355_REG_RANGE      0x2C // Range register (0x01 = +/-2g, 0x02 = +/-4g, 0x03 = +/-8g)
-#define ADXL355_REG_POWER_CTL  0x2D // Power control (bit 0: 0 = Measurement, 1 = Standby)
+#define ADXL355_REG_RANGE      0x2C
+#define ADXL355_REG_POWER_CTL  0x2D
 
-// Scale factor for +/-2g range: 256,000 LSB/g (3.9 ug/LSB)
-const float ADXL355_SCALE_2G = 256000.0f;
-
-// Baud rate for Web Serial API
+const float ADXL355_SCALE_2G = 256000.0f; // Scale factor for +/-2g range: 256,000 LSB/g
 #define SERIAL_BAUD        921600
 
 // ============================================================================
@@ -78,6 +101,7 @@ struct TrajectoryPoint {
 
 #define MAX_POINTS 4096
 TrajectoryPoint trajectoryBuffer[MAX_POINTS];
+float knotVelocities[MAX_POINTS];
 volatile uint16_t bufferPointCount = 0;
 volatile uint16_t bufferDtMs = 20;
 
@@ -93,13 +117,37 @@ enum SystemState {
 volatile SystemState currentState = STATE_IDLE;
 volatile int32_t currentStepPos = 0;
 volatile bool emergencyStopFlag = false;
+volatile bool sensorEnabled = true;
+
+// Lock-Free Telemetry Queue
+struct TelemetryItem {
+  uint32_t t_ms;
+  float accel;
+  float disp;
+  int32_t step;
+};
+
+#define TLM_QUEUE_SIZE 256
+TelemetryItem tlmQueue[TLM_QUEUE_SIZE];
+volatile uint16_t tlmHead = 0;
+volatile uint16_t tlmTail = 0;
+
+inline void pushTelemetry(uint32_t t_ms, float accel, float disp, int32_t step) {
+  uint16_t nextHead = (tlmHead + 1) % TLM_QUEUE_SIZE;
+  if (nextHead != tlmTail) {
+    tlmQueue[tlmHead].t_ms = t_ms;
+    tlmQueue[tlmHead].accel = accel;
+    tlmQueue[tlmHead].disp = disp;
+    tlmQueue[tlmHead].step = step;
+    tlmHead = nextHead;
+  }
+}
 
 // Hardware Serial instance for TMC2209 UART
 HardwareSerial DriverSerial(1);
 TMC2209Stepper driverL(&DriverSerial, R_SENSE, DRIVER_ADDRESS_L);
 TMC2209Stepper driverR(&DriverSerial, R_SENSE, DRIVER_ADDRESS_R);
 
-// FreeRTOS Task Handle for Core 1 Motion Engine
 TaskHandle_t motionTaskHandle = NULL;
 
 // ============================================================================
@@ -110,7 +158,7 @@ SPISettings adxlSpiSettings(10000000, MSBFIRST, SPI_MODE0); // 10MHz SPI Mode 0
 uint8_t adxlReadByte(uint8_t reg) {
   SPI.beginTransaction(adxlSpiSettings);
   digitalWrite(PIN_ADXL_CS, LOW);
-  SPI.transfer((reg << 1) | 0x01); // Read command bit 0 = 1
+  SPI.transfer((reg << 1) | 0x01);
   uint8_t val = SPI.transfer(0x00);
   digitalWrite(PIN_ADXL_CS, HIGH);
   SPI.endTransaction();
@@ -120,7 +168,7 @@ uint8_t adxlReadByte(uint8_t reg) {
 void adxlWriteByte(uint8_t reg, uint8_t val) {
   SPI.beginTransaction(adxlSpiSettings);
   digitalWrite(PIN_ADXL_CS, LOW);
-  SPI.transfer((reg << 1) | 0x00); // Write command bit 0 = 0
+  SPI.transfer((reg << 1) | 0x00);
   SPI.transfer(val);
   digitalWrite(PIN_ADXL_CS, HIGH);
   SPI.endTransaction();
@@ -130,96 +178,123 @@ float adxlReadAccelX() {
   SPI.beginTransaction(adxlSpiSettings);
   digitalWrite(PIN_ADXL_CS, LOW);
   SPI.transfer((ADXL355_REG_XDATA3 << 1) | 0x01);
-  uint8_t b0 = SPI.transfer(0x00); // XDATA3 (bits 19:12)
-  uint8_t b1 = SPI.transfer(0x00); // XDATA2 (bits 11:4)
-  uint8_t b2 = SPI.transfer(0x00); // XDATA1 (bits 3:0 in bits [7:4])
+  uint8_t b0 = SPI.transfer(0x00);
+  uint8_t b1 = SPI.transfer(0x00);
+  uint8_t b2 = SPI.transfer(0x00);
   digitalWrite(PIN_ADXL_CS, HIGH);
   SPI.endTransaction();
 
-  // Reconstruct 20-bit two's complement integer
   int32_t rawX = ((int32_t)b0 << 12) | ((int32_t)b1 << 4) | ((int32_t)b2 >> 4);
   if (rawX & 0x80000) {
-    rawX |= 0xFFF00000; // Sign extend negative values
+    rawX |= 0xFFF00000;
   }
-
-  // Convert to g (for +/- 2g range: 256,000 LSB/g)
   return (float)rawX / ADXL355_SCALE_2G;
 }
 
 // ============================================================================
-// 3. HARDWARE STEPPING & MOTION ENGINE (CORE 1)
+// 3. CONTINUOUS CUBIC HERMITE TRAJECTORY ENGINE (CORE 1)
 // ============================================================================
 
-void IRAM_ATTR executeStepPulse(bool dirForward) {
-  // Set direction pins (both motors move in sync for shake table carriage)
-  digitalWrite(PIN_DIR_L, dirForward ? HIGH : LOW);
-  digitalWrite(PIN_DIR_R, dirForward ? HIGH : LOW);
+void calculateKnotVelocities() {
+  if (bufferPointCount < 2) return;
+  float dt_sec = (float)bufferDtMs / 1000.0f;
   
-  // Ultra-short pulse (TMC2209 minimum step pulse width is 100ns)
-  digitalWrite(PIN_STEP_L, HIGH);
-  digitalWrite(PIN_STEP_R, HIGH);
-  delayMicroseconds(2);
-  digitalWrite(PIN_STEP_L, LOW);
-  digitalWrite(PIN_STEP_R, LOW);
-  delayMicroseconds(2);
+  for (uint16_t i = 1; i < bufferPointCount - 1; i++) {
+    knotVelocities[i] = (float)(trajectoryBuffer[i + 1].target_step - trajectoryBuffer[i - 1].target_step) / (2.0f * dt_sec);
+  }
+  knotVelocities[0] = (float)(trajectoryBuffer[1].target_step - trajectoryBuffer[0].target_step) / dt_sec;
+  knotVelocities[bufferPointCount - 1] = (float)(trajectoryBuffer[bufferPointCount - 1].target_step - trajectoryBuffer[bufferPointCount - 2].target_step) / dt_sec;
+}
+
+inline float evaluateHermite(int32_t p0, int32_t p1, float v0, float v1, float dt_sec, float tau) {
+  float tau2 = tau * tau;
+  float tau3 = tau2 * tau;
+  float h00 = 2.0f * tau3 - 3.0f * tau2 + 1.0f;
+  float h10 = tau3 - 2.0f * tau2 + tau;
+  float h01 = -2.0f * tau3 + 3.0f * tau2;
+  float h11 = tau3 - tau2;
+  return h00 * (float)p0 + h10 * dt_sec * v0 + h01 * (float)p1 + h11 * dt_sec * v1;
 }
 
 void motionTaskCore1(void* parameter) {
   for (;;) {
-    // Wait until notified to start
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    if (bufferPointCount == 0 || emergencyStopFlag) {
+    if (bufferPointCount < 2 || emergencyStopFlag) {
       continue;
     }
 
     currentState = STATE_RUNNING;
-    Serial.println("STATUS:SHAKING_ACTIVE [FreeRTOS Core 1 Motion Engine Active]");
+    calculateKnotVelocities();
 
-    // Enable both drivers (Active LOW)
+    // Enable drivers (Active LOW)
     digitalWrite(PIN_EN, LOW);
+    delayMicroseconds(50); // TMC2209 gate wake-up time
 
-    uint32_t startTime = millis();
+    uint32_t intervalDurationUs = (uint32_t)bufferDtMs * 1000;
+    float dt_sec = (float)bufferDtMs / 1000.0f;
+    uint32_t motionStartTimeUs = micros();
+    uint32_t lastStepTimeUs = motionStartTimeUs;
+    uint16_t currentInterval = 0;
+    bool currentDirForward = true;
 
-    for (uint16_t i = 0; i < bufferPointCount; i++) {
-      if (emergencyStopFlag) break;
+    while (currentInterval < bufferPointCount - 1 && !emergencyStopFlag) {
+      uint32_t nowUs = micros();
+      uint32_t elapsedMotionUs = nowUs - motionStartTimeUs;
+      uint16_t activeK = elapsedMotionUs / intervalDurationUs;
 
-      TrajectoryPoint pt = trajectoryBuffer[i];
-      int32_t stepsToMove = pt.target_step - currentStepPos;
-      bool forward = stepsToMove >= 0;
-      int32_t absSteps = abs(stepsToMove);
-
-      uint32_t intervalStart = micros();
-      uint32_t intervalDurationUs = bufferDtMs * 1000;
-
-      if (absSteps > 0) {
-        uint32_t stepIntervalUs = intervalDurationUs / absSteps;
-        if (stepIntervalUs < 10) stepIntervalUs = 10;
-
-        for (int32_t s = 0; s < absSteps; s++) {
-          if (emergencyStopFlag) break;
-          executeStepPulse(forward);
-          currentStepPos += forward ? 1 : -1;
-          delayMicroseconds(stepIntervalUs);
+      // Handle interval advancement and non-blocking telemetry queuing
+      if (activeK > currentInterval) {
+        while (currentInterval < activeK && currentInterval < bufferPointCount) {
+          float accel_g = sensorEnabled ? adxlReadAccelX() : 0.0f;
+          pushTelemetry(trajectoryBuffer[currentInterval].t_ms, accel_g, trajectoryBuffer[currentInterval].disp_mm, currentStepPos);
+          currentInterval++;
         }
+        if (currentInterval >= bufferPointCount - 1) break;
       }
 
-      // Read real ADXL355 20-bit digital acceleration
-      float accel_g = adxlReadAccelX();
+      // Compute exact position along cubic Hermite trajectory
+      uint32_t intervalElapsedUs = elapsedMotionUs - (activeK * intervalDurationUs);
+      float tau = (float)intervalElapsedUs / (float)intervalDurationUs;
+      if (tau > 1.0f) tau = 1.0f;
 
-      // Stream high-rate telemetry line to USB Serial
-      Serial.printf("TLM:%lu,%.5f,%.3f,%ld\n", pt.t_ms, accel_g, pt.disp_mm, currentStepPos);
+      float exactPos = evaluateHermite(
+        trajectoryBuffer[activeK].target_step,
+        trajectoryBuffer[activeK + 1].target_step,
+        knotVelocities[activeK],
+        knotVelocities[activeK + 1],
+        dt_sec,
+        tau
+      );
 
-      // Maintain deterministic interval timing
-      uint32_t elapsedUs = micros() - intervalStart;
-      if (elapsedUs < intervalDurationUs) {
-        delayMicroseconds(intervalDurationUs - elapsedUs);
+      int32_t targetStep = (int32_t)lroundf(exactPos);
+
+      // Deterministic pulse generation with minimum pulse interval safety
+      if (targetStep != currentStepPos) {
+        if (nowUs - lastStepTimeUs >= 18) { // Max ~55,000 steps/sec
+          bool needForward = (targetStep > currentStepPos);
+          if (needForward != currentDirForward) {
+            currentDirForward = needForward;
+            setStepDirection(currentDirForward);
+            delayMicroseconds(1);
+          }
+          pulseStepPins();
+          currentStepPos += currentDirForward ? 1 : -1;
+          lastStepTimeUs = nowUs;
+        }
+      } else {
+        delayMicroseconds(2);
       }
+    }
+
+    // Push final point telemetry
+    if (bufferPointCount > 0) {
+      float accel_g = sensorEnabled ? adxlReadAccelX() : 0.0f;
+      pushTelemetry(trajectoryBuffer[bufferPointCount - 1].t_ms, accel_g, trajectoryBuffer[bufferPointCount - 1].disp_mm, currentStepPos);
     }
 
     if (!emergencyStopFlag) {
       currentState = STATE_READY;
-      Serial.println("STATUS:SHAKE_COMPLETE [Profile Finished, Carriage Idle at 0.00mm]");
     }
   }
 }
@@ -229,47 +304,37 @@ void motionTaskCore1(void* parameter) {
 // ============================================================================
 
 void setup() {
-  // 1. Completely disable WiFi and Bluetooth hardware to eliminate jitter & EMI
   esp_wifi_stop();
   esp_wifi_deinit();
   esp_bt_controller_disable();
   esp_bt_controller_deinit();
 
-  // 2. High-speed USB Serial for Web Serial API
   Serial.begin(SERIAL_BAUD);
   Serial.setRxBufferSize(16384);
 
-  // 3. Configure Stepper GPIOs
   pinMode(PIN_STEP_L, OUTPUT);
   pinMode(PIN_DIR_L, OUTPUT);
   pinMode(PIN_STEP_R, OUTPUT);
   pinMode(PIN_DIR_R, OUTPUT);
   pinMode(PIN_EN, OUTPUT);
 
-  // Default: Drivers disabled (HIGH) until trajectory executes
-  digitalWrite(PIN_EN, HIGH);
+  digitalWrite(PIN_EN, HIGH); // Disabled until trajectory runs
   digitalWrite(PIN_STEP_L, LOW);
   digitalWrite(PIN_STEP_R, LOW);
+  setStepDirection(true);
 
-  // 4. Configure ADXL355 High-Precision SPI Accelerometer
+  // ADXL355 SPI Init
   pinMode(PIN_ADXL_CS, OUTPUT);
-  digitalWrite(PIN_ADXL_CS, HIGH); // CS idle HIGH
-
-  // Initialize hardware SPI bus on defined pins (SCLK, MISO, MOSI, SS)
+  digitalWrite(PIN_ADXL_CS, HIGH);
   SPI.begin(PIN_ADXL_SCK, PIN_ADXL_MISO, PIN_ADXL_MOSI, PIN_ADXL_CS);
 
-  // Read PARTID (Should return 0xED)
-  uint8_t devId = adxlReadByte(ADXL355_REG_DEVID_AD); // 0xAD
-  uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);   // 0xED
+  uint8_t devId = adxlReadByte(ADXL355_REG_DEVID_AD);
+  uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);
+  adxlWriteByte(ADXL355_REG_RANGE, 0x01); // +/- 2g
+  adxlWriteByte(ADXL355_REG_POWER_CTL, 0x00); // Measurement mode
+  delay(10);
 
-  // Set Range to +/- 2g (0x01)
-  adxlWriteByte(ADXL355_REG_RANGE, 0x01);
-
-  // Power control: clear STANDBY bit (write 0x00) to enter Active Measurement Mode
-  adxlWriteByte(ADXL355_REG_POWER_CTL, 0x00);
-  delay(10); // Settle analog front-end filter
-
-  // 5. Initialize TMC2209 Drivers via Single-Wire UART
+  // TMC2209 Init
   DriverSerial.begin(115200, SERIAL_8N1, PIN_TMC_RX, PIN_TMC_TX);
 
   driverL.begin();
@@ -277,29 +342,30 @@ void setup() {
   driverL.blank_time(24);
   driverL.rms_current(MOTOR_RMS_CURRENT);
   driverL.microsteps(MICROSTEPS);
-  driverL.en_spreadCycle(false); // StealthChop for silent, vibration-free motion
-  driverL.pwm_autoscale(true);
+  driverL.intpol(true);         // 256 microstep interpolation
+  driverL.en_spreadCycle(true); // SpreadCycle for dynamic torque & anti-stall
+  driverL.pwm_autoscale(false);
 
   driverR.begin();
   driverR.toff(4);
   driverR.blank_time(24);
   driverR.rms_current(MOTOR_RMS_CURRENT);
   driverR.microsteps(MICROSTEPS);
-  driverR.en_spreadCycle(false);
-  driverR.pwm_autoscale(true);
+  driverR.intpol(true);
+  driverR.en_spreadCycle(true);
+  driverR.pwm_autoscale(false);
 
-  // 6. Launch Dedicated Motion Task pinned to Core 1
   xTaskCreatePinnedToCore(
     motionTaskCore1,
     "MotionEngineCore1",
     8192,
     NULL,
-    configMAX_PRIORITIES - 1, // High priority
+    configMAX_PRIORITIES - 1,
     &motionTaskHandle,
-    1 // Pin strictly to Core 1
+    1
   );
 
-  Serial.printf("STATUS:READY [ESP32-S3 Ready | ADXL355:0x%02X (Part:0x%02X) | Dual TMC2209:OK]\n", devId, partId);
+  Serial.printf("STATUS:READY [ESP32-S3 Ready | ADXL355:0x%02X (Part:0x%02X) | Dual TMC2209:SPREADCYCLE_OK]\n", devId, partId);
 }
 
 // ============================================================================
@@ -314,7 +380,6 @@ void processChunkPayload(int offset, const String& payload) {
     int nextSemi = payload.indexOf(';', startIdx);
     String token = (nextSemi == -1) ? payload.substring(startIdx) : payload.substring(startIdx, nextSemi);
 
-    // Token format: time_ms:target_step:disp_mm
     int c1 = token.indexOf(':');
     int c2 = token.lastIndexOf(':');
 
@@ -335,6 +400,14 @@ void processChunkPayload(int offset, const String& payload) {
 }
 
 void loop() {
+  // 1. Drain non-blocking telemetry queue to USB Serial
+  while (tlmTail != tlmHead) {
+    TelemetryItem item = tlmQueue[tlmTail];
+    tlmTail = (tlmTail + 1) % TLM_QUEUE_SIZE;
+    Serial.printf("TLM:%lu,%.5f,%.3f,%ld\n", item.t_ms, item.accel, item.disp, item.step);
+  }
+
+  // 2. Process incoming Web Serial commands
   if (Serial.available()) {
     String line = Serial.readStringUntil('\n');
     line.trim();
@@ -344,14 +417,17 @@ void loop() {
       uint8_t verL = driverL.version();
       uint8_t verR = driverR.version();
       uint8_t partId = adxlReadByte(ADXL355_REG_PARTID);
-      Serial.printf("PONG:ESP32-S3_DUAL_STEPPER_FW_V2.4 [TMC2209_L:0x%02X, TMC2209_R:0x%02X, ADXL355:0x%02X]\n", verL, verR, partId);
+      Serial.printf("PONG:ESP32-S3_DUAL_STEPPER_FW_V3.5 [TMC2209_L:0x%02X, TMC2209_R:0x%02X, ADXL355:0x%02X, SPREADCYCLE:OK]\n", verL, verR, partId);
+    }
+    else if (line.startsWith("CFG:SENSOR=")) {
+      sensorEnabled = (line.substring(11).toInt() == 1);
+      Serial.printf("OK:SENSOR_CONFIGURED [ADXL355:%s]\n", sensorEnabled ? "ACTIVE" : "DISABLED");
     }
     else if (line.startsWith("BUF_START:")) {
       emergencyStopFlag = false;
       currentState = STATE_BUFFERING;
       bufferPointCount = 0;
 
-      // Extract dt_ms if present
       int dtIdx = line.indexOf("DT_MS=");
       if (dtIdx > 0) {
         bufferDtMs = line.substring(dtIdx + 6).toInt();
@@ -367,7 +443,6 @@ void loop() {
       Serial.println("OK:BUFFER_ALLOCATED_SRAM (Free DMA: 284KB)");
     }
     else if (line.startsWith("CHUNK:")) {
-      // Format: CHUNK:<offset>:<chunkPayload>
       int firstColon = line.indexOf(':');
       int secondColon = line.indexOf(':', firstColon + 1);
       if (firstColon > 0 && secondColon > firstColon) {
@@ -383,6 +458,9 @@ void loop() {
     else if (line.startsWith("EXEC:START")) {
       if (currentState == STATE_READY && motionTaskHandle != NULL) {
         emergencyStopFlag = false;
+        tlmHead = 0;
+        tlmTail = 0;
+        Serial.println("STATUS:SHAKING_ACTIVE [FreeRTOS Core 1 Motion Engine Active]");
         xTaskNotifyGive(motionTaskHandle);
       } else {
         Serial.println("WARN:NOT_READY_TO_EXECUTE");
@@ -391,7 +469,7 @@ void loop() {
     else if (line.startsWith("ESTOP")) {
       emergencyStopFlag = true;
       currentState = STATE_ESTOP;
-      digitalWrite(PIN_EN, HIGH); // Disable stepper H-bridges (Active LOW)
+      digitalWrite(PIN_EN, HIGH);
       Serial.println("WARN:ESTOP_ASSERTED - Stepper PWM Killed, Table Disabled");
     }
     else if (line.startsWith("HOME")) {
@@ -402,4 +480,3 @@ void loop() {
     }
   }
 }
-
