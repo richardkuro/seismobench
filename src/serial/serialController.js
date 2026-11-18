@@ -93,10 +93,12 @@ export class SeismoSerialController {
       this.logRx(`[SYSTEM] Connected to physical ESP32 port @ ${this.baudRate} baud`);
 
       // Start continuous background read stream
-      this.startReading();
+      this.readLoopPromise = this.startReading();
 
-      // Send initial handshake ping
+      // Give port time to establish stream, send initial handshake ping and home
+      await new Promise(r => setTimeout(r, 60));
       await this.sendPacket('PING:SEISMOBENCH_V1');
+      await this.sendPacket('HOME:CONNECT_INIT');
       return true;
     } catch (err) {
       await this.disconnect();
@@ -203,11 +205,11 @@ export class SeismoSerialController {
     } else if (line.includes('STATUS:SHAKING_ACTIVE')) {
       this.setState('RUNNING');
     } else if (line.includes('STATUS:SHAKE_COMPLETE')) {
-      this.setState('CONNECTED');
+      this.setState('READY');
     } else if (line.includes('WARN:ESTOP_ASSERTED')) {
       this.isEstop = true;
       this.setState('ESTOP');
-    } else if (line.includes('OK:RESET_CYCLE_COMPLETE')) {
+    } else if (line.includes('OK:HOMING_CYCLE_COMPLETE') || line.includes('OK:RESET_CYCLE_COMPLETE')) {
       this.isEstop = false;
       this.setState('READY');
     }
@@ -229,14 +231,18 @@ export class SeismoSerialController {
       throw new Error('Serial port is not writable.');
     }
 
-    const encoder = new TextEncoder();
-    const data = encoder.encode(packet);
-    const writer = this.port.writable.getWriter();
-    try {
-      await writer.write(data);
-    } finally {
-      writer.releaseLock();
-    }
+    // Queue packets through write promise to avoid "Cannot get a writer for a locked stream"
+    return (this.writeQueue = (this.writeQueue || Promise.resolve()).then(async () => {
+      if (!this.port || !this.port.writable) return;
+      const encoder = new TextEncoder();
+      const data = encoder.encode(packet);
+      const writer = this.port.writable.getWriter();
+      try {
+        await writer.write(data);
+      } finally {
+        writer.releaseLock();
+      }
+    }));
   }
 
   /**
@@ -260,7 +266,6 @@ export class SeismoSerialController {
     if (this.isConnected && !this.isSimulated) {
       try {
         await this.sendPacket(`CFG:SENSOR=${mode === 'with_adxl' ? 1 : 0}`);
-        await this.sendPacket(mode === 'with_adxl' ? 'ADXL:ATTACH' : 'ADXL:REMOVE');
       } catch (e) {}
     }
   }
@@ -312,7 +317,14 @@ export class SeismoSerialController {
     const total = trajectoryPoints.length;
     this.setState('BUFFERING');
 
-    await this.sendPacket(`BUF_START:POINTS=${total},DT_MS=${Math.round((trajectoryPoints[1]?.time - trajectoryPoints[0]?.time) * 1000 || 20)}`);
+    // 1. Zero carriage position in firmware before buffer transfer
+    if (!this.isSimulated) {
+      await this.sendPacket('HOME:PRE_BUFFER_ZERO');
+      await new Promise(r => setTimeout(r, 60));
+    }
+
+    const dtMs = Math.round((trajectoryPoints[1]?.time - trajectoryPoints[0]?.time) * 1000 || 20);
+    await this.sendPacket(`BUF_START:POINTS=${total},DT_MS=${dtMs}`);
 
     // Stream points in chunks of 50 points (exact format from version 1)
     const chunkSize = 50;
@@ -324,22 +336,36 @@ export class SeismoSerialController {
 
       const chunk = trajectoryPoints.slice(i, i + chunkSize);
       // Strictly 3 fields: time_ms:target_step:disp_mm (matching flashed ESP32 firmware parser)
-      const chunkPayload = chunk.map(p => `${Math.round(p.time * 1000)}:${p.step}:${p.disp.toFixed(2)}`).join(';');
+      const chunkPayload = chunk.map(p => `${Math.round(p.time * 1000)}:${p.step}:${Number(p.disp).toFixed(2)}`).join(';');
       
       await this.sendPacket(`CHUNK:${i}:${chunkPayload}`);
 
       const progress = Math.min(100, Math.round(((i + chunk.length) / total) * 100));
       if (this.onProgress) this.onProgress(progress, i + chunk.length, total);
 
-      // Brief yield
-      await new Promise(r => setTimeout(r, this.isSimulated ? 2 : 20));
+      // Yield for serial transfer
+      await new Promise(r => setTimeout(r, this.isSimulated ? 2 : 25));
     }
 
     if (!this.isEstop) {
       await this.sendPacket(`BUF_END:CHECKSUM=0x${(total * 47 & 0xFFFF).toString(16).toUpperCase()}`);
-      // Settle delay so ESP32 serial ISR processes BUF_END and sets STATE_READY
-      await new Promise(r => setTimeout(r, 80));
-      this.setState('READY');
+      
+      // Wait for ESP32 to acknowledge STATUS:READY or settle
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          this.setState('READY');
+          resolve();
+        }, 300);
+
+        const checkInterval = setInterval(() => {
+          if (this.state === 'READY') {
+            clearInterval(checkInterval);
+            clearTimeout(timeout);
+            resolve();
+          }
+        }, 20);
+      });
+
       this.logRx(`[SYSTEM] Trajectory buffer verification passed. ${total} motion steps loaded.`);
     }
   }
@@ -363,24 +389,11 @@ export class SeismoSerialController {
     this.stopExecution();
     this.setState('ESTOP');
 
-    // 1. Send software ESTOP packet
+    // Send software ESTOP packet to immediately kill stepper PWM & disable H-bridges
     try {
       await this.sendPacket('ESTOP:EMERGENCY_HALT');
     } catch (e) {
       console.warn('ESTOP packet send notice:', e);
-    }
-
-    // 2. Hardware E-STOP via USB CDC: Pulse RTS/DTR signals to assert ESP32 EN hardware reset!
-    // This immediately halts motor PWM in < 1 microsecond without waiting for the shake loop!
-    if (this.port && this.isConnected && !this.isSimulated) {
-      try {
-        await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
-        await new Promise(r => setTimeout(r, 20));
-        await this.port.setSignals({ dataTerminalReady: true, requestToSend: false });
-        this.logRx('WARN:HARDWARE_ESTOP_TRIGGERED - USB EN reset pulse asserted. Motor power cut instantly.');
-      } catch (err) {
-        console.warn('Hardware reset signal notice:', err);
-      }
     }
   }
 
@@ -391,7 +404,8 @@ export class SeismoSerialController {
     this.isEstop = false;
     this.stopExecution();
     try {
-      await this.sendPacket('RESET:ESTOP_CLEAR');
+      // Send HOME to clear emergencyStopFlag and set currentState = STATE_READY in firmware!
+      await this.sendPacket('HOME:RESET_ESTOP');
     } catch (e) {}
     this.setState('READY');
     this.logRx('[SYSTEM] E-STOP cleared. Motor drivers re-enabled.');
@@ -496,15 +510,26 @@ export class SeismoSerialController {
     this.isSimulated = false;
 
     if (this.reader) {
-      try { await this.reader.cancel(); } catch (e) {}
-      this.reader = null;
+      try {
+        await this.reader.cancel();
+      } catch (e) {}
+    }
+
+    if (this.readLoopPromise) {
+      try {
+        await this.readLoopPromise;
+      } catch (e) {}
+      this.readLoopPromise = null;
     }
 
     if (this.port) {
-      try { await this.port.close(); } catch (e) {}
+      try {
+        await this.port.close();
+      } catch (e) {}
       this.port = null;
     }
 
+    this.reader = null;
     this.setState('DISCONNECTED');
   }
 }

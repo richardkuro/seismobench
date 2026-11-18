@@ -286,20 +286,36 @@ export function App() {
   };
 
   const handleUploadBuffer = async () => {
-    if (dspResult.displacement.length === 0) return;
+    if (dspResult.displacement.length === 0) return false;
 
-    // Direct, uncorrupted trajectory formulation (matching Build 1)
-    const trajectory = dspResult.displacement.map((disp, i) => ({
-      time: dspResult.time[i],
-      disp: Number(disp.toFixed(2)),
-      step: Math.round(disp * stepsPerMm),
-      accel: dspResult.accelFiltered[i]
-    }));
+    // Safety step delta limiter to protect hardware from stalling / screeching:
+    // Max safe velocity: config.maxVelocityMmS (e.g. 250 mm/s) * stepsPerMm * dt
+    const maxDeltaSteps = Math.round(config.maxVelocityMmS * stepsPerMm * (dspResult.dt || 0.02));
+
+    let prevStep = 0;
+    const trajectory = dspResult.displacement.map((rawDisp, i) => {
+      let step = Math.round(rawDisp * stepsPerMm);
+      // Soft-clamp excessive step accelerations to physical motor capability (prevents stall & grinding noise)
+      const stepDelta = step - prevStep;
+      if (Math.abs(stepDelta) > maxDeltaSteps) {
+        step = prevStep + Math.sign(stepDelta) * maxDeltaSteps;
+      }
+      prevStep = step;
+
+      return {
+        time: dspResult.time[i],
+        disp: Number((step / stepsPerMm).toFixed(2)),
+        step: step,
+        accel: dspResult.accelFiltered[i]
+      };
+    });
 
     try {
       await serial.uploadTrajectoryBuffer(trajectory);
+      return true;
     } catch (err) {
       alert(`Buffer upload failed: ${err.message}`);
+      return false;
     }
   };
 
@@ -309,14 +325,14 @@ export function App() {
       // If table was in E-STOP state, cleanly reset it first
       if (serial.isEstop || connectionState === 'ESTOP') {
         await serial.resetEstop();
+        await new Promise(r => setTimeout(r, 60));
       }
 
       // Check if current trajectory is already loaded into the ESP32 SRAM
       const currentSignature = `${selectedEarthquakeId}_${amplitudeScale}_${timeScale}_${stepsPerMm}_${dspResult.displacement.length}`;
       if (lastLoadedSignatureRef.current !== currentSignature || serial.trajectoryBuffer.length === 0) {
-        await handleUploadBuffer();
-        // Give ESP32 time to parse BUF_END and transition into STATE_READY
-        await new Promise(r => setTimeout(r, 120));
+        const ok = await handleUploadBuffer();
+        if (!ok) return;
         lastLoadedSignatureRef.current = currentSignature;
       }
 
