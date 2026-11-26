@@ -1,0 +1,315 @@
+<?xml version="1.0" ?>
+<mxfile host="app.diagrams.net" modified="2026-11-26T20:30:00.000Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)" version="24.7.5" type="device">
+  <diagram id="seismobench-hardware-architecture" name="SeismoBench Hardware Block Diagram">
+    <mxGraphModel dx="2200" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1400" background="#F8FAFC" math="0" shadow="1">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title_box" value="&lt;b&gt;&lt;font style=&quot;font-size: 22px;&quot;&gt;SEISMOBENCH: PRECISION DUAL-STEPPER SHAKE TABLE CONTROLLER&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;b&gt;&lt;font style=&quot;font-size: 13px; color: #475569;&quot;&gt;COMPLETE HARDWARE ARCHITECTURE &amp;amp; SIGNAL WIRING BLOCK DIAGRAM&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;font style=&quot;font-size: 11px; color: #64748B;&quot;&gt;ESP32-S3 Dual-Core (240MHz) | Dual TMC2209 SpreadCycle (1000mA RMS) | ADXL355 20-bit SPI Accelerometer | Web Serial Direct Stream (921,600 Baud)&lt;/font&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;rounded=0;fontFamily=Helvetica;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1100" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="legend_box" value="&lt;b&gt;DIAGRAM BUS &amp;amp; SIGNAL LEGEND&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;color:#2563EB;&quot;&gt;━ Web Serial / Telemetry (921.6k Baud)&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;color:#059669;&quot;&gt;━ Hard Real-Time Step/Dir Pulses (GPIO)&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;color:#7C3AED;&quot;&gt;━ TMC Single-Wire UART Bus (115.2k Baud)&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;color:#0891B2;&quot;&gt;━ High-Speed SPI Bus (5 MHz Mode 0)&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;color:#DC2626;&quot;&gt;━ DC Power Rails (VMOT 12/24V, 5V, 3.3V)&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;color:#D97706;&quot;&gt;━ Mechanical Timing Belt / Coupling&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#CBD5E1;align=left;spacingLeft=10;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1730" y="15" width="290" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="c_host" value="1. HOST WORKSTATION &amp;amp; WEB APP INTERFACE" style="swimlane;html=1;startSize=36;rounded=1;shadow=1;comic=0;labelBackgroundColor=none;strokeWidth=2;fillColor=#F1F5F9;strokeColor=#475569;fontStyle=1;fontSize=13;fontColor=#0F172A;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="40" y="95" width="340" height="655" as="geometry"/>
+        </mxCell>
+        <mxCell id="c_mcu" value="2. CENTRAL EMBEDDED CONTROLLER: ESP32-S3 DEVKIT (Dual-Core @ 240MHz)" style="swimlane;html=1;startSize=36;rounded=1;shadow=1;comic=0;labelBackgroundColor=none;strokeWidth=2;fillColor=#ECFDF5;strokeColor=#059669;fontStyle=1;fontSize=13;fontColor=#064E3B;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="410" y="95" width="780" height="655" as="geometry"/>
+        </mxCell>
+        <mxCell id="c_pwr" value="3. POWER DISTRIBUTION SUBSYSTEM (PDS)" style="swimlane;html=1;startSize=36;rounded=1;shadow=1;comic=0;labelBackgroundColor=none;strokeWidth=2;fillColor=#FEF2F2;strokeColor=#DC2626;fontStyle=1;fontSize=13;fontColor=#7F1D1D;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="95" width="490" height="235" as="geometry"/>
+        </mxCell>
+        <mxCell id="c_drv" value="4. DUAL TRINAMIC TMC2209 STEPPER DRIVE SUBSYSTEM" style="swimlane;html=1;startSize=36;rounded=1;shadow=1;comic=0;labelBackgroundColor=none;strokeWidth=2;fillColor=#FAF5FF;strokeColor=#9333EA;fontStyle=1;fontSize=13;fontColor=#581C87;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="350" width="490" height="400" as="geometry"/>
+        </mxCell>
+        <mxCell id="c_sens" value="5. ACCELERATION SENSING &amp;amp; TELEMETRY FEEDBACK" style="swimlane;html=1;startSize=36;rounded=1;shadow=1;comic=0;labelBackgroundColor=none;strokeWidth=2;fillColor=#ECFEFF;strokeColor=#0891B2;fontStyle=1;fontSize=13;fontColor=#164E63;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="40" y="775" width="480" height="395" as="geometry"/>
+        </mxCell>
+        <mxCell id="c_mech" value="6. MECHANICAL SHAKE TABLE BENCH &amp;amp; KINEMATICS" style="swimlane;html=1;startSize=36;rounded=1;shadow=1;comic=0;labelBackgroundColor=none;strokeWidth=2;fillColor=#FFFBEB;strokeColor=#D97706;fontStyle=1;fontSize=13;fontColor=#78350F;align=left;spacingLeft=15;" vertex="1" parent="1">
+          <mxGeometry x="550" y="775" width="1160" height="395" as="geometry"/>
+        </mxCell>
+        <mxCell id="host_pc" value="&lt;b&gt;Host Computer / Laptop&lt;/b&gt;&lt;br&gt;OS: Windows / Linux / macOS&lt;br&gt;Browser: Chrome / Edge / Opera&lt;br&gt;&lt;i&gt;(Native Web Serial API Support)&lt;/i&gt;" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#E0E7FF;strokeColor=#4F46E5;fontColor=#312E81;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="145" width="300" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="host_dsp" value="&lt;b&gt;SeismoBench DSP Engine&lt;/b&gt;&lt;br&gt;• 2nd-Order Butterworth HPF (fc = 0.20 Hz)&lt;br&gt;• Double Integration: a(t) → v(t) → x(t)&lt;br&gt;• Baseline Zero-Drift Correction&lt;br&gt;• Radix-2 FFT Analyzer (0 - 25 Hz)" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#64748B;fontColor=#1E293B;" vertex="1" parent="1">
+          <mxGeometry x="60" y="230" width="300" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="host_records" value="&lt;b&gt;Seismic Record Library &amp;amp; Generator&lt;/b&gt;&lt;br&gt;• 1940 El Centro (NS Component)&lt;br&gt;• 1995 Kobe JMA (Near-Fault Pulse)&lt;br&gt;• 1994 Northridge (Sylmar Hospital)&lt;br&gt;• Synthetic Sine Sweep (1 - 15 Hz Chirp)&lt;br&gt;• Custom CSV Seismogram Ingest" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#64748B;fontColor=#1E293B;" vertex="1" parent="1">
+          <mxGeometry x="60" y="325" width="300" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="host_kinematics" value="&lt;b&gt;Kinematic Trajectory Generator&lt;/b&gt;&lt;br&gt;• Steps/mm Mapping: 80.0 steps/mm&lt;br&gt;• Max Velocity Clamp: 250 mm/s&lt;br&gt;• Max Accel Clamp: 5000 mm/s²&lt;br&gt;• Full-Fidelity Unclipped Stream" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#64748B;fontColor=#1E293B;" vertex="1" parent="1">
+          <mxGeometry x="60" y="435" width="300" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="host_webserial" value="&lt;b&gt;Web Serial Controller&lt;/b&gt;&lt;br&gt;• Direct USB-CDC Stream @ 921,600 Baud&lt;br&gt;• Chunks: BUF_START:POINTS=N,DT_MS=dt&lt;br&gt;• CHUNK:offset:t:step:disp;...&lt;br&gt;• Safety Controls: ESTOP, HOME, CFG:SENSOR" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#E0E7FF;strokeColor=#4F46E5;fontColor=#312E81;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="530" width="300" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="host_charts" value="&lt;b&gt;Real-Time Interactive Dashboard&lt;/b&gt;&lt;br&gt;• Input vs Actual Telemetry Waveform&lt;br&gt;• Dynamic RMSE &amp;amp; Correlation (Rxy)&lt;br&gt;• Phase Lag Measurement (ms)&lt;br&gt;• FFT Frequency Spectrum Overlay" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#64748B;fontColor=#1E293B;" vertex="1" parent="1">
+          <mxGeometry x="60" y="630" width="300" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="mcu_usb" value="&lt;b&gt;USB-CDC / UART Bridge Interface&lt;/b&gt;&lt;br&gt;Hardware FIFO @ &lt;b&gt;921,600 Baud&lt;/b&gt; (Direct USB Stream)&lt;br&gt;Full Duplex Command Ingest &amp;amp; Telemetry Egress" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#10B981;fontColor=#064E3B;" vertex="1" parent="1">
+          <mxGeometry x="440" y="145" width="720" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="box_core0" value="&lt;b&gt;XTENSA LX7 - CORE 0: PROTOCOL &amp;amp; SENSOR MANAGER&lt;/b&gt;" style="swimlane;html=1;startSize=26;rounded=1;fillColor=#D1FAE5;strokeColor=#10B981;fontColor=#064E3B;fontSize=11;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="440" y="205" width="340" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="core0_parser" value="&lt;b&gt;Web Serial Packet Parser&lt;/b&gt;&lt;br&gt;• BUF_START, CHUNK, BUF_END&lt;br&gt;• EXEC:START, ESTOP, HOME, PING&lt;br&gt;• Sensor Config (CFG:SENSOR=0/1)" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#D1FAE5;strokeColor=#059669;fontColor=#064E3B;" vertex="1" parent="1">
+          <mxGeometry x="455" y="240" width="310" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="core0_sram" value="&lt;b&gt;DMA SRAM Trajectory Buffer&lt;/b&gt;&lt;br&gt;• MAX_POINTS = 4096 (TrajectoryPoint)&lt;br&gt;• Point: {uint32_t t_ms, int32_t step, float disp}&lt;br&gt;• Free SRAM &amp;gt; 280KB (WiFi/BT unlinked)" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#D1FAE5;strokeColor=#059669;fontColor=#064E3B;" vertex="1" parent="1">
+          <mxGeometry x="455" y="325" width="310" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="core0_drain" value="&lt;b&gt;Async Telemetry Queue Drainer&lt;/b&gt;&lt;br&gt;• Polls lock-free ring buffer in loop()&lt;br&gt;• Drains: TLM:t_ms,accel,disp,step&lt;br&gt;• Zero blocking impact on Core 1 motion" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#D1FAE5;strokeColor=#059669;fontColor=#064E3B;" vertex="1" parent="1">
+          <mxGeometry x="455" y="415" width="310" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="mcu_ipc" value="&lt;b&gt;Inter-Core Lock-Free IPC &amp;amp; RTOS Sync&lt;/b&gt;&lt;br&gt;• FreeRTOS Task Notification (xTaskNotifyGive)&lt;br&gt;• Atomic Emergency Stop Flag (volatile bool)&lt;br&gt;• Lock-Free Ring Buffer (tlmQueue[128], &amp;lt; 1µs push)" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FEE2E2;strokeColor=#EF4444;fontColor=#991B1B;" vertex="1" parent="1">
+          <mxGeometry x="440" y="545" width="720" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="box_core1" value="&lt;b&gt;XTENSA LX7 - CORE 1: HARD REAL-TIME MOTION ENGINE&lt;/b&gt;" style="swimlane;html=1;startSize=26;rounded=1;fillColor=#A7F3D0;strokeColor=#059669;fontColor=#064E3B;fontSize=11;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="820" y="205" width="340" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="core1_freertos" value="&lt;b&gt;Dedicated Motion Task (Core 1)&lt;/b&gt;&lt;br&gt;• Pinned Task: motionTaskCore1 (8KB Stack)&lt;br&gt;• Priority: configMAX_PRIORITIES - 1&lt;br&gt;• Deterministic hard real-time execution" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#A7F3D0;strokeColor=#047857;fontColor=#064E3B;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="835" y="240" width="310" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="core1_spline" value="&lt;b&gt;Continuous Cubic Hermite Spline Engine&lt;/b&gt;&lt;br&gt;• Sub-step continuous trajectory evaluation&lt;br&gt;• C¹ velocity continuity across intervals&lt;br&gt;• Natural 0.0 velocity turnaround at wave peaks&lt;br&gt;• Zero infinite-jerk impulses &amp;amp; zero croaking" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#A7F3D0;strokeColor=#047857;fontColor=#064E3B;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="835" y="320" width="310" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="core1_pulsing" value="&lt;b&gt;Microsecond Step Sequencer&lt;/b&gt;&lt;br&gt;• Fast digital pulse generation: pulseStepPins()&lt;br&gt;• Minimum 2µs pulse width (TMC2209 compatible)&lt;br&gt;• Instantaneous directional control" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#A7F3D0;strokeColor=#047857;fontColor=#064E3B;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="835" y="430" width="310" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="mcu_pinout" value="&lt;b&gt;ESP32-S3 PHYSICAL GPIO ALLOCATION &amp;amp; PIN MAPPING TABLE&lt;/b&gt;&lt;br&gt;• &lt;b&gt;Left Stepper (X1):&lt;/b&gt; STEP → GPIO 25 | DIR → GPIO 26&lt;br&gt;• &lt;b&gt;Right Stepper (X2):&lt;/b&gt; STEP → GPIO 18 | DIR → GPIO 19&lt;br&gt;• &lt;b&gt;Shared Motor Enable:&lt;/b&gt; EN → GPIO 23 (Active LOW, Hardware Disable on ESTOP)&lt;br&gt;• &lt;b&gt;Trinamic Single-Wire UART:&lt;/b&gt; RX2 → GPIO 16 | TX2 → GPIO 17 (via 1kΩ Resistor)&lt;br&gt;• &lt;b&gt;ADXL355 SPI Bus:&lt;/b&gt; CS → GPIO 27 | SCK → GPIO 14 | MISO → GPIO 12 | MOSI → GPIO 13" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#10B981;fontColor=#064E3B;" vertex="1" parent="1">
+          <mxGeometry x="440" y="605" width="720" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwr_mains" value="&lt;b&gt;AC Mains Input&lt;/b&gt;&lt;br&gt;100 - 240V AC&lt;br&gt;50 / 60 Hz" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#EF4444;fontColor=#7F1D1D;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="145" width="120" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwr_smps" value="&lt;b&gt;DC Switch-Mode Power Supply&lt;/b&gt;&lt;br&gt;Output: &lt;b&gt;12V / 24V DC @ 10A&lt;/b&gt;&lt;br&gt;Overload &amp;amp; Short Protection" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FEE2E2;strokeColor=#DC2626;fontColor=#7F1D1D;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="145" width="190" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwr_caps" value="&lt;b&gt;Decoupling Filter Capacitors&lt;/b&gt;&lt;br&gt;Dual &lt;b&gt;100µF 35V Low-ESR&lt;/b&gt;&lt;br&gt;Prevents Back-EMF Spikes on VMOT" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#EF4444;fontColor=#7F1D1D;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="215" width="190" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwr_logic" value="&lt;b&gt;Logic Power Regulators&lt;/b&gt;&lt;br&gt;• USB VBUS: 5.0V DC (ESP32 DevKit)&lt;br&gt;• Onboard LDO: 3.3V DC (VIO &amp;amp; ADXL VDD)" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#EF4444;fontColor=#7F1D1D;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="215" width="130" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="pwr_gnd" value="&lt;b&gt;Unified Star Ground Bus&lt;/b&gt;&lt;br&gt;Common Ground: 12V/24V Power GND + 5V USB GND + 3.3V Logic GND" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#EF4444;fontColor=#7F1D1D;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="275" width="300" height="35" as="geometry"/>
+        </mxCell>
+        <mxCell id="tmc_left" value="&lt;b&gt;TRINAMIC TMC2209 - LEFT (X1)&lt;/b&gt;&lt;br&gt;&lt;b&gt;UART Address: 0b00&lt;/b&gt; (MS1=GND, MS2=GND)&lt;br&gt;• Mode: &lt;b&gt;SpreadCycle&lt;/b&gt; (en_spreadCycle=true)&lt;br&gt;• Microstepping: 1/16 (Interpolated to &lt;b&gt;256&lt;/b&gt;)&lt;br&gt;• Current: &lt;b&gt;1000 mA RMS&lt;/b&gt; (Rsense = 0.11Ω)&lt;br&gt;• Pins: STEP (D25), DIR (D26), EN (D23)&lt;br&gt;• VMOT: 12-24V | VIO: 3.3V | PDN_UART" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#581C87;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="400" width="220" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="tmc_right" value="&lt;b&gt;TRINAMIC TMC2209 - RIGHT (X2)&lt;/b&gt;&lt;br&gt;&lt;b&gt;UART Address: 0b01&lt;/b&gt; (MS1=VIO, MS2=GND)&lt;br&gt;• Mode: &lt;b&gt;SpreadCycle&lt;/b&gt; (en_spreadCycle=true)&lt;br&gt;• Microstepping: 1/16 (Interpolated to &lt;b&gt;256&lt;/b&gt;)&lt;br&gt;• Current: &lt;b&gt;1000 mA RMS&lt;/b&gt; (Rsense = 0.11Ω)&lt;br&gt;• Pins: STEP (D18), DIR (D19), EN (D23)&lt;br&gt;• VMOT: 12-24V | VIO: 3.3V | PDN_UART" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#F3E8FF;strokeColor=#9333EA;fontColor=#581C87;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1475" y="400" width="220" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="tmc_features" value="&lt;b&gt;TMC2209 Anti-Resonance Dynamic Configuration&lt;/b&gt;&lt;br&gt;• &lt;b&gt;SpreadCycle Mode:&lt;/b&gt; Cycle-by-cycle hardware peak-current chopper eliminates StealthChop back-EMF phase collapse and prevents motor croaking during fast 1-15 Hz reversals.&lt;br&gt;• &lt;b&gt;MicroPlyer Interpolation:&lt;/b&gt; Smooths 1/16 step pulses into 256 microstep sine waves.&lt;br&gt;• &lt;b&gt;Single-Wire UART Bus:&lt;/b&gt; Real-time dynamic current tuning, blank time (24), toff (4)." style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#A855F7;fontColor=#581C87;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="555" width="455" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="motor_left" value="&lt;b&gt;NEMA 17 Stepper (Left X1)&lt;/b&gt;&lt;br&gt;1.8° Step Angle (200 Steps/Rev)&lt;br&gt;Bipolar 4-Wire (Coils 1A/1B, 2A/2B)&lt;br&gt;High Dynamic Torque" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#EDE9FE;strokeColor=#7C3AED;fontColor=#4C1D95;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="650" width="220" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="motor_right" value="&lt;b&gt;NEMA 17 Stepper (Right X2)&lt;/b&gt;&lt;br&gt;1.8° Step Angle (200 Steps/Rev)&lt;br&gt;Bipolar 4-Wire (Coils 1A/1B, 2A/2B)&lt;br&gt;Synchronized Dual Drive" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#EDE9FE;strokeColor=#7C3AED;fontColor=#4C1D95;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1475" y="650" width="220" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="adxl_chip" value="&lt;b&gt;Analog Devices EVAL-ADXL355Z Accelerometer&lt;/b&gt;&lt;br&gt;• &lt;b&gt;Resolution:&lt;/b&gt; 20-bit High-Precision Triaxial ADC&lt;br&gt;• &lt;b&gt;Measurement Range:&lt;/b&gt; ±2.048g Dynamic Range&lt;br&gt;• &lt;b&gt;Scale Factor:&lt;/b&gt; 256,000 LSB/g (0.0039 mg/LSB)&lt;br&gt;• &lt;b&gt;Noise Density:&lt;/b&gt; 25 µg/√Hz (Ultra-Low Noise Floor)&lt;br&gt;• &lt;b&gt;Output Data Rate:&lt;/b&gt; Up to 4000 Hz&lt;br&gt;• &lt;b&gt;Physical Sensor Health:&lt;/b&gt; PartID: 0xED, DevID: 0xAD" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#CFFAFE;strokeColor=#0891B2;fontColor=#164E63;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="825" width="440" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="adxl_spi" value="&lt;b&gt;High-Speed SPI Digital Interface&lt;/b&gt;&lt;br&gt;• Clock Rate: &lt;b&gt;5.0 MHz&lt;/b&gt; | SPI Mode: &lt;b&gt;Mode 0&lt;/b&gt; (CPOL=0, CPHA=0)&lt;br&gt;• Signals: CS (D27), SCK (D14), MISO (D12), MOSI (D13)&lt;br&gt;• Readout: 20-bit XDATA registers (Burst Read 0x08 - 0x0A)&lt;br&gt;• Dedicated low-noise analog LDO supply (3.3V VDD / VIO)" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#06B6D4;fontColor=#164E63;" vertex="1" parent="1">
+          <mxGeometry x="60" y="955" width="440" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="adxl_mount" value="&lt;b&gt;Rigid Carriage Mechanical Coupling&lt;/b&gt;&lt;br&gt;• Direct bolt mount on center-of-mass of the vibrating shake table plate.&lt;br&gt;• Measures true physical ground acceleration response a_actual(t).&lt;br&gt;• Software Bypass: CFG:SENSOR=0 allows open-loop operation if sensor is unplugged." style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#06B6D4;fontColor=#164E63;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1060" width="440" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="mech_pulleys" value="&lt;b&gt;Dual GT2 Timing Pulleys&lt;/b&gt;&lt;br&gt;• Pitch: &lt;b&gt;2.0 mm&lt;/b&gt;&lt;br&gt;• Tooth Count: &lt;b&gt;20T&lt;/b&gt; (Aluminum)&lt;br&gt;• Circumference: &lt;b&gt;40.0 mm / rev&lt;/b&gt;&lt;br&gt;• Bore: 5mm with dual grub screws" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#F59E0B;fontColor=#78350F;" vertex="1" parent="1">
+          <mxGeometry x="575" y="825" width="230" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="mech_belts" value="&lt;b&gt;Dual GT2 Timing Belts&lt;/b&gt;&lt;br&gt;• High-tensile Neoprene with fiberglass core&lt;br&gt;• Zero-backlash dual synchronized drive&lt;br&gt;• Integrated spring/screw tensioners&lt;br&gt;• Pitch: 2mm | Width: 6mm" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#F59E0B;fontColor=#78350F;" vertex="1" parent="1">
+          <mxGeometry x="825" y="825" width="250" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="mech_kinematics" value="&lt;b&gt;Calculated Kinematic Resolution&lt;/b&gt;&lt;br&gt;&lt;b&gt;Steps per mm = (200 × 16) / (20 × 2) = 80.0 steps/mm&lt;/b&gt;&lt;br&gt;• Linear Resolution: &lt;b&gt;12.5 µm per microstep&lt;/b&gt;&lt;br&gt;• MicroPlyer 256 Virtual Resolution: &lt;b&gt;0.78 µm / step&lt;/b&gt;&lt;br&gt;• Maximum Linear Speed: 250+ mm/s" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#78350F;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1095" y="825" width="300" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="mech_rails" value="&lt;b&gt;Precision Linear Motion Guides&lt;/b&gt;&lt;br&gt;• Dual MGN12 Precision Ground Linear Guide Rails / Hardened Chrome Shafts&lt;br&gt;• 4x Recirculating Ball Bearing Slider Blocks (Zero-play, ultra-low rolling friction)&lt;br&gt;• Eliminates lateral yaw, carriage tilt, and parasitic pitch oscillation" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#F59E0B;fontColor=#78350F;" vertex="1" parent="1">
+          <mxGeometry x="575" y="930" width="820" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="mech_table" value="&lt;b&gt;SHAKE TABLE PLATFORM / MOVING CARRIAGE&lt;/b&gt;&lt;br&gt;• &lt;b&gt;Physical Stroke Limit:&lt;/b&gt; ±40.0 mm (80 mm Total Linear Travel Stroke)&lt;br&gt;• &lt;b&gt;Construction:&lt;/b&gt; High-rigidity CNC anodized aluminum / acrylic fixture plate&lt;br&gt;• &lt;b&gt;Payload Capacity:&lt;/b&gt; Up to 5.0 kg structural specimens &amp;amp; scale models&lt;br&gt;• &lt;b&gt;Integrated Safety:&lt;/b&gt; Soft software clamps + mechanical damped endstop bumpers" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FEF3C7;strokeColor=#D97706;fontColor=#78350F;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="575" y="1010" width="520" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="mech_specimen" value="&lt;b&gt;TEST SPECIMEN / EXPERIMENTAL BENCH&lt;/b&gt;&lt;br&gt;• Multi-Story Building Scale Frame / SDOF Resonator&lt;br&gt;• Tuned Liquid Damper (TLD) / Base Isolation Bearings&lt;br&gt;• Structural Dynamic Resonance Investigation (1 - 15 Hz)&lt;br&gt;• Real-time destructive &amp;amp; non-destructive seismic analysis" style="rounded=1;whiteSpace=wrap;html=1;shadow=1;strokeWidth=1.5;fontSize=11;fontFamily=Helvetica;fillColor=#FFFFFF;strokeColor=#F59E0B;fontColor=#78350F;" vertex="1" parent="1">
+          <mxGeometry x="1115" y="1010" width="280" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_host_mcu" value="Web Serial API (921,600 Baud Full Duplex USB-CDC Direct Stream)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#2563EB;fontColor=#1E40AF;;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0" edge="1" parent="1" source="host_webserial" target="mcu_usb">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_core0_ipc" value="Trajectory Buffer Pointers &amp;amp; Sync" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="core0_sram" target="mcu_ipc">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_ipc_core1" value="xTaskNotifyGive / Motion Execution Trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;;exitX=0.75;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0" edge="1" parent="1" source="mcu_ipc" target="core1_freertos">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_core1_tlm" value="Lock-Free Telemetry Push (&amp;lt; 1µs)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;" edge="1" parent="1" source="core1_spline" target="mcu_ipc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="990" y="525"/>
+              <mxPoint x="750" y="525"/>
+              <mxPoint x="750" y="545"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_ipc_drain" value="Telemetry Ring Buffer Pop" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#2563EB;fontColor=#1E40AF;" edge="1" parent="1" source="mcu_ipc" target="core0_drain">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="650" y="545"/>
+              <mxPoint x="650" y="505"/>
+              <mxPoint x="610" y="505"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_step_left" value="Left Step/Dir (D25, D26)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0" edge="1" parent="1" source="mcu_pinout" target="tmc_left">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_step_right" value="Right Step/Dir (D18, D19)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;;exitX=1;exitY=0.4;exitDx=0;exitDy=0;entryX=0;entryY=0.4;entryDx=0;entryDy=0" edge="1" parent="1" source="mcu_pinout" target="tmc_right">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1175" y="649"/>
+              <mxPoint x="1210" y="649"/>
+              <mxPoint x="1210" y="480"/>
+              <mxPoint x="1475" y="480"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_en_shared" value="Shared Enable (D23, Active LOW)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;;exitX=1;exitY=0.6;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0" edge="1" parent="1" source="mcu_pinout" target="tmc_features">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1160" y="671"/>
+              <mxPoint x="1200" y="671"/>
+              <mxPoint x="1200" y="595"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_uart_bus" value="TMC Single-Wire UART (TX2 D17 + 1kΩ, RX2 D16)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#7C3AED;fontColor=#5B21B6;;exitX=1;exitY=0.8;exitDx=0;exitDy=0;entryX=0;entryY=0.8;entryDx=0;entryDy=0" edge="1" parent="1" source="mcu_pinout" target="tmc_features">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1160" y="693"/>
+              <mxPoint x="1220" y="693"/>
+              <mxPoint x="1220" y="619"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_drv_mot_l" value="Motor Phases (1A, 1B, 2A, 2B)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="tmc_left" target="motor_left">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_drv_mot_r" value="Motor Phases (1A, 1B, 2A, 2B)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#059669;fontColor=#065F46;strokeWidth=2.5;;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="tmc_right" target="motor_right">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_mot_pulley_l" value="Rotor Shaft Coupling (5mm D-Shaft)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="motor_left" target="mech_pulleys">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1350" y="740"/>
+              <mxPoint x="1350" y="760"/>
+              <mxPoint x="760" y="760"/>
+              <mxPoint x="760" y="825"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_mot_pulley_r" value="Rotor Shaft Coupling (5mm D-Shaft)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.8;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="motor_right" target="mech_belts">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1585" y="740"/>
+              <mxPoint x="1585" y="770"/>
+              <mxPoint x="1025" y="770"/>
+              <mxPoint x="1025" y="825"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_pulleys_belts" value="GT2 2mm Mesh" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;" edge="1" parent="1" source="mech_pulleys" target="mech_belts">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_belts_table" value="Belt Clamps (Linear Drive Force)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.6;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="mech_belts" target="mech_table">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="950" y="925"/>
+              <mxPoint x="950" y="990"/>
+              <mxPoint x="887" y="990"/>
+              <mxPoint x="887" y="1010"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_rails_table" value="Low-Friction Linear Constraint" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;;exitX=0.3;exitY=1;exitDx=0;exitDy=0;entryX=0.3;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="mech_rails" target="mech_table">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_table_specimen" value="Rigid Structural Clamping" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0" edge="1" parent="1" source="mech_table" target="mech_specimen">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_table_adxl" value="Physical Motion &amp;amp; Inertial Vibration Coupling" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0" edge="1" parent="1" source="mech_table" target="adxl_mount">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="575" y="1067"/>
+              <mxPoint x="530" y="1067"/>
+              <mxPoint x="530" y="1100"/>
+              <mxPoint x="500" y="1100"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_mount_chip" value="Mechanical Rigidity" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#D97706;fontColor=#92400E;strokeWidth=3;;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0" edge="1" parent="1" source="adxl_mount" target="adxl_chip">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_adxl_spi" value="SPI Bus: CS (D27), SCK (D14), MISO (D12), MOSI (D13) @ 5 MHz" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#0891B2;fontColor=#0E7490;;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.1;entryY=1;entryDx=0;entryDy=0" edge="1" parent="1" source="adxl_spi" target="mcu_pinout">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="955"/>
+              <mxPoint x="280" y="750"/>
+              <mxPoint x="512" y="750"/>
+              <mxPoint x="512" y="715"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_ac_smps" value="AC Mains Line" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#DC2626;fontColor=#991B1B;strokeWidth=2.5;" edge="1" parent="1" source="pwr_mains" target="pwr_smps">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_smps_caps" value="24V/12V DC Bus" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#DC2626;fontColor=#991B1B;strokeWidth=2.5;" edge="1" parent="1" source="pwr_smps" target="pwr_caps">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e_caps_vmot_l" value="VMOT (12-24V DC)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#DC2626;fontColor=#991B1B;strokeWidth=2.5;;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="pwr_caps" target="tmc_left">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1428" y="265"/>
+              <mxPoint x="1428" y="335"/>
+              <mxPoint x="1350" y="335"/>
+              <mxPoint x="1350" y="400"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_caps_vmot_r" value="VMOT (12-24V DC)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#DC2626;fontColor=#991B1B;strokeWidth=2.5;;exitX=0.8;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="pwr_caps" target="tmc_right">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1542" y="265"/>
+              <mxPoint x="1542" y="335"/>
+              <mxPoint x="1585" y="335"/>
+              <mxPoint x="1585" y="400"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_usb_pwr" value="USB 5V VBUS Power" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#DC2626;fontColor=#991B1B;strokeWidth=2.5;;exitX=0.95;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.2;entryDx=0;entryDy=0" edge="1" parent="1" source="mcu_usb" target="pwr_logic">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1160" y="167"/>
+              <mxPoint x="1210" y="167"/>
+              <mxPoint x="1210" y="233"/>
+              <mxPoint x="1240" y="233"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_ldo_vio" value="3.3V Logic Bus (VIO)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;jettySize=auto;orthogonalLoop=1;strokeWidth=2;fontSize=10;labelBackgroundColor=#FFFFFF;strokeColor=#DC2626;fontColor=#991B1B;strokeWidth=2.5;;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.1;entryY=0;entryDx=0;entryDy=0" edge="1" parent="1" source="pwr_logic" target="tmc_features">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1305" y="305"/>
+              <mxPoint x="1305" y="340"/>
+              <mxPoint x="1285" y="340"/>
+              <mxPoint x="1285" y="555"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
